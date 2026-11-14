@@ -115,6 +115,12 @@ func TestCalculate(t *testing.T) {
 		t.Errorf("Strict with a prose title: %v", err)
 	}
 
+	dir = repo(t, []string{"Before", "Merge pull request #2 from o/harness/1\n\nfeat: a merged pull request"}, map[int]string{0: "v0.4.0"})
+	p, err = Calculate(ctx, dir, Series{})
+	if err != nil || p.Next.String() != "0.4.1" || len(p.Changes) != 1 || p.Changes[0].Subject != "feat: a merged pull request" || p.Strict() != nil {
+		t.Errorf("a merge commit: %+v, %v; want its pull request's title read", p, err)
+	}
+
 	if _, err := Calculate(ctx, t.TempDir(), Series{}); err == nil {
 		t.Error("Calculate outside git: no error")
 	}
