@@ -1,0 +1,17 @@
+# The monorepo, for the harness: see https://github.com/michaelckearney/harness
+schema: 1
+# The harness this monorepo uses: what its pipelines install, and what its
+# servers update themselves to when this changes on the default branch.
+harness: {{.Version}}
+repo: {{.Repo}}
+# Who can give the bots work: only their issues, comments, reviews, and labels count.
+triggers: [{{.Owner}}]
+agents:
+  default: opencode
+  # An agent that sends the code to a third party belongs here only if whoever
+  # owns the code agreed to it.
+  allowed: [opencode]
+# The projects, each a folder the framework builds. The framework, the code
+# and tooling every project shares, is always in framework/.
+projects: {}
+#  app: projects/app

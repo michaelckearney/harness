@@ -1,0 +1,32 @@
+# Checks every pull request: harness check, and harness test on what it
+# affects, in the framework's image, from the default branch's cache.
+# No secrets: the bots push branches to this repository, so anything a pull
+# request's workflow can read, a bot's change could read too.
+name: pull request
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: pr-${{"{{"}} github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install the harness harness.yaml pins
+        run: |
+          v="$(sed -n 's/^harness: *//p' harness.yaml | tr -d "\"' ")"
+          cd "$(mktemp -d)"
+          curl -fsSLO "https://github.com/michaelckearney/harness/releases/download/$v/harness-linux-amd64"
+          curl -fsSL "https://github.com/michaelckearney/harness/releases/download/$v/SHA256SUMS" | sha256sum -c --ignore-missing
+          sudo install harness-linux-amd64 /usr/local/bin/harness
+      - run: harness ci pr "origin/${{"{{"}} github.base_ref }}"
+        env:
+          GH_TOKEN: ${{"{{"}} github.token }}

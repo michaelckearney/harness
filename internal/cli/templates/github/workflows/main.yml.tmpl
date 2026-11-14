@@ -1,0 +1,46 @@
+# The default branch: release the projects that have something to release,
+# and test everything to keep the cache pull requests start from. Nothing
+# here deploys: the servers update themselves to the harness harness.yaml
+# pins.
+name: main
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: main
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - &install
+        name: Install the harness harness.yaml pins
+        run: |
+          v="$(sed -n 's/^harness: *//p' harness.yaml | tr -d "\"' ")"
+          cd "$(mktemp -d)"
+          curl -fsSLO "https://github.com/michaelckearney/harness/releases/download/$v/harness-linux-amd64"
+          curl -fsSL "https://github.com/michaelckearney/harness/releases/download/$v/SHA256SUMS" | sha256sum -c --ignore-missing
+          sudo install harness-linux-amd64 /usr/local/bin/harness
+      - run: harness ci release
+        env:
+          GH_TOKEN: ${{"{{"}} github.token }}
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - *install
+      - run: harness ci test
+        env:
+          GH_TOKEN: ${{"{{"}} github.token }}
