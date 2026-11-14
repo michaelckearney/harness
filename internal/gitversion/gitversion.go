@@ -100,6 +100,9 @@ var types = map[string]Bump{
 
 var title = regexp.MustCompile(`^([a-z]+)(\([^()]+\))?(!)?: \S`)
 
+// pr is the subject of the commit GitHub makes to merge a pull request.
+var pr = regexp.MustCompile(`^Merge pull request #\d+ from \S+$`)
+
 var breakingFooter = regexp.MustCompile(`(?m)^BREAKING[ -]CHANGE: `)
 
 // Change is one commit on the default branch since the last release.
@@ -220,8 +223,14 @@ func Calculate(ctx context.Context, dir string, series Series) (Plan, error) {
 			continue
 		}
 		c := Change{SHA: f[0], Subject: f[1]}
+		// GitHub's merge commit names the branch and puts the pull
+		// request's title first in its body: the title is the change.
+		if pr.MatchString(f[1]) {
+			title, rest, _ := strings.Cut(f[2], "\n")
+			c.Subject, f[2] = strings.TrimSpace(title), rest
+		}
 		var ok bool
-		c.Type, c.Bump, ok = classify(f[1], f[2])
+		c.Type, c.Bump, ok = classify(c.Subject, f[2])
 		if !ok {
 			p.Unreadable = append(p.Unreadable, c)
 			continue
