@@ -366,29 +366,38 @@ type Upload struct {
 // to commit its recording into the branch. The owner's token never reaches
 // the bot; it uploads only files harness serve has checked are in the worktree.
 func (c *Client) Upload(repo string, u Upload) error {
-	out, err := exec.Command(u.Gh, "auth", "token").Output()
+	body, err := c.UploadFiles(repo, u.Gh, u.Body, u.Files)
 	if err != nil {
-		return fmt.Errorf("the owner's gh login, which uploads files: %w", err)
+		return err
+	}
+	if u.PR {
+		return c.SetBody(repo, u.N, body)
+	}
+	return c.Comment(repo, u.N, body)
+}
+
+// UploadFiles uploads each file with the owner's gh login, as Upload does,
+// and returns body with each file's URL where it names the file.
+func (c *Client) UploadFiles(repo, gh, body string, files []string) (string, error) {
+	out, err := exec.Command(gh, "auth", "token").Output()
+	if err != nil {
+		return "", fmt.Errorf("the owner's gh login, which uploads files: %w", err)
 	}
 	owner := strings.TrimSpace(string(out))
 	var r struct {
 		ID int64 `json:"id"`
 	}
 	if err := c.call(repo, "GET", "/repos/"+repo, nil, &r); err != nil {
-		return err
+		return "", err
 	}
-	body := u.Body
-	for _, f := range u.Files {
+	for _, f := range files {
 		asset, err := c.uploadFile(owner, r.ID, f)
 		if err != nil {
-			return fmt.Errorf("could not upload %s: %w", f, err)
+			return "", fmt.Errorf("could not upload %s: %w", f, err)
 		}
 		body = linkFile(body, f, asset)
 	}
-	if u.PR {
-		return c.SetBody(repo, u.N, body)
-	}
-	return c.Comment(repo, u.N, body)
+	return body, nil
 }
 
 // ContentTypes are the files GitHub takes as attachments, by extension.

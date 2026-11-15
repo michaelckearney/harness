@@ -338,7 +338,9 @@ attach files, and start threads in them.
   reads the conversation, a checkout of the default branch, the issues and
   pull requests, and earlier discussions in the server, which it can
   search. When the owner tells it to, it opens issues, comments, and
-  labels on GitHub as the owner, so the bots take them as the owner's word;
+  labels on GitHub as the owner, so the bots take them as the owner's word
+  (an issue can show images and videos from the checkout, uploaded as the
+  owner's are);
   in a conversation someone else started, it can only say what it would
   do. One Discord turn runs at a time, with the monorepo's default agent.
 

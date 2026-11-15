@@ -473,11 +473,26 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 				return "", err
 			}
 		}
+		// The images and videos it shows from the checkout go up first, as
+		// a reply's do.
+		dir := req.BodyDir
+		if dir == "" {
+			dir = s.talkDir(p)
+		}
+		body, files, err := attachments(strings.TrimSpace(body), dir, s.talkDir(p))
+		if err != nil {
+			return "", err
+		}
+		if len(files) > 0 {
+			if body, err = s.gh.UploadFiles(p.cfg.Repo, s.cfg.Gh, body, files); err != nil {
+				return "", err
+			}
+		}
 		tok, err := github.OwnerToken(s.cfg.Gh)
 		if err != nil {
 			return "", err
 		}
-		issue, err := s.gh.OpenIssue(p.cfg.Repo, strings.TrimSpace(title), strings.TrimSpace(body)+footer, labels, tok)
+		issue, err := s.gh.OpenIssue(p.cfg.Repo, strings.TrimSpace(title), body+footer, labels, tok)
 		if err != nil {
 			return "", err
 		}
