@@ -2,6 +2,9 @@ package service
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -195,13 +198,32 @@ func TestTalkingInDiscord(t *testing.T) {
 	// The owner does, at the top of #general: a thread starts under the
 	// message, the bot reads what was said before it, and opens the issue
 	// as the owner, which a bot then works.
-	chat.history["t1001"] = []discord.Msg{{ID: "1001", Channel: "c1", Author: "me", AuthorID: "42", Content: "@Sparky go ahead and open an issue for it", Time: now}}
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/shot.png" {
+			w.Header().Set("Content-Type", "image/png")
+			fmt.Fprint(w, "png")
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer cdn.Close()
+	chat.history["t1001"] = []discord.Msg{{ID: "1001", Channel: "c1", Author: "me", AuthorID: "42", Content: "@Sparky go ahead and open an issue for it", Time: now,
+		Files: []string{cdn.URL + "/shot.png?ex=1", cdn.URL + "/gone.png"}}}
 	h.s.converse(discord.Mention{Msg: discord.Msg{ID: "1001", Channel: "c1", Author: "me", AuthorID: "42", Content: "@Sparky go ahead and open an issue for it", Time: now}, Where: "general"})
 	prompts := h.read("prompts")
 	for _, want := range []string{"me mentioned you in #general", "They are the owner", "pat: Should the app say hi?", "me: @Sparky go ahead"} {
 		if !strings.Contains(prompts, want) {
 			t.Errorf("the prompt lacks %q:\n%s", want, prompts)
 		}
+	}
+	// What was attached is a file the bot can open; what could not be
+	// fetched keeps its link.
+	shot := filepath.Join(h.s.cfg.StateDir, "attachments", "o", "r", "discord-t1001", "1001-0.png")
+	if !strings.Contains(prompts, "attached: "+shot) || !strings.Contains(prompts, "not copied here") {
+		t.Errorf("the prompt's attachments:\n%s", prompts)
+	}
+	if data, err := os.ReadFile(shot); err != nil || string(data) != "png" {
+		t.Errorf("the copy: %q %v", data, err)
 	}
 	if got := chat.said("t1001"); len(got) != 1 || got[0] != "Opened it." {
 		t.Errorf("said in the thread: %q", got)
