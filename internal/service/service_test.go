@@ -133,7 +133,8 @@ task)
 	ls shots > "$FAKE_DIR/task-shots" 2>&1
 	printf 'feat: tidy the header\n\nThe header has two lines; make it one.\n' | "$BS" open-issue -label design - >> "$out" 2>&1
 	printf 'feat: tidy the header\n\nThe header has two lines; make it one.\n' | "$BS" open-issue -label framework -label project:app - >> "$out" 2>&1
-	printf 'feat: tidy the header\n\nThe header has two lines; make it one.\n' | "$BS" open-issue -label framework - >> "$out" 2>&1
+	printf 'feat: leak\n\n![key](/etc/hosts)\n' | "$BS" open-issue -label framework - >> "$out" 2>&1
+	printf 'feat: tidy the header\n\nThe header has two lines; make it one.\n\n![the header](shots/header.png)\n' | "$BS" open-issue -label framework - >> "$out" 2>&1
 	printf 'feat: another\n\nMore.\n' | "$BS" open-issue -label framework - >> "$out" 2>&1
 	echo "Done." | "$BS" reply - >> "$out" 2>&1
 	echo "Me too." | "$BS" comment 1 - >> "$out" 2>&1

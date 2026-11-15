@@ -60,6 +60,17 @@ func TestTasks(t *testing.T) {
 			t.Errorf("what the bot was told lacks %q:\n%s", want, out)
 		}
 	}
+	// The screenshot it shows went up with the owner's login, and the issue
+	// shows it; a file outside the checkout is refused.
+	if up := h.gh.uploaded(); len(up) != 1 || up[0] != "token owner-token header.png image/png" {
+		t.Errorf("uploads: %q", up)
+	}
+	if !strings.Contains(issues[0].Body, "![the header](https://github.test/user-attachments/assets/1)") {
+		t.Errorf("the issue's body: %q", issues[0].Body)
+	}
+	if !strings.Contains(out, "outside your worktree") || len(h.gh.issuesTitled("feat: leak")) != 0 {
+		t.Errorf("a file outside the checkout:\n%s", out)
+	}
 	if len(h.gh.issuesTitled("feat: another")) != 0 {
 		t.Error("a run opened a second issue")
 	}

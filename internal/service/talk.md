@@ -36,7 +36,7 @@ EOF
 | `$HARNESS issue <n>` | an issue or pull request, and what was said on it |
 | `$HARNESS search-discord <words>` | earlier messages in the server that match, with links |
 | `$HARNESS read-discord <link>` | a message and those around it, or a thread, by its link |
-| `$HARNESS open-issue [-label <label>]... -` | opens an issue: its title on the first line, then its description |
+| `$HARNESS open-issue [-label <label>]... -` | opens an issue: its title on the first line, then its description; an image or video from your folder, `![what it shows](path)`, is shown in it |
 | `$HARNESS comment <n> -` | comments on an issue or pull request |
 | `$HARNESS label <n> <label>...` | labels an issue |
 | `$HARNESS done` | ends the turn |
