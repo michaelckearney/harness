@@ -212,14 +212,10 @@ func (s *Service) converse(m discord.Mention) {
 		if msg.AuthorID == me {
 			continue
 		}
-		line := fmt.Sprintf("[%s] %s: %s", msg.Time.Format("2006-01-02 15:04"), msg.Author, msg.Content)
-		for _, f := range msg.Files {
-			line += "\n  attached: " + f
-		}
-		lines = append(lines, line)
+		lines = append(lines, s.talkLine(p, thread, msg))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, fmt.Sprintf("[%s] %s: %s", m.Time.Format("2006-01-02 15:04"), m.Author, m.Content))
+		lines = append(lines, s.talkLine(p, thread, m.Msg))
 	}
 
 	owner := m.AuthorID == s.cfg.Discord.Owner
@@ -266,6 +262,25 @@ func (s *Service) converse(m discord.Mention) {
 	if data, err := json.Marshal(c); err == nil {
 		s.st.Set(key, string(data))
 	}
+}
+
+// talkLine is a message as a Discord turn's prompt shows it. The images
+// and videos attached to it are copied to this machine, where the bot can
+// open them with its read tool: it cannot fetch a link, and Discord's links
+// expire within a day. A file that is neither, or cannot be fetched, keeps
+// its link.
+func (s *Service) talkLine(p *proj, thread string, m discord.Msg) string {
+	line := fmt.Sprintf("[%s] %s: %s", m.Time.Format("2006-01-02 15:04"), m.Author, m.Content)
+	dir := filepath.Join(s.cfg.StateDir, "attachments", p.cfg.Repo, "discord-"+thread)
+	for i, u := range m.Files {
+		file, err := fetchAttached(dir, fmt.Sprintf("%s-%d", m.ID, i), u, attachedClient.Get)
+		if err != nil {
+			line += "\n  attached, and not copied here (" + err.Error() + "): " + u
+			continue
+		}
+		line += "\n  attached: " + file
+	}
+	return line
 }
 
 // olderID reports whether Discord's ID a is older than b: snowflakes grow.
@@ -385,7 +400,7 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		}
 		var lines []string
 		for _, m := range msgs {
-			lines = append(lines, fmt.Sprintf("[%s] %s: %s", m.Time.Format("2006-01-02 15:04"), m.Author, m.Content))
+			lines = append(lines, s.talkLine(p, m.Channel, m))
 		}
 		return strings.Join(lines, "\n"), nil
 	case "open-issue":
