@@ -58,6 +58,9 @@ type Issue struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	PullRequest *struct{} `json:"pull_request"`
+	Labels      []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 }
 
 type Comment struct {
@@ -531,6 +534,31 @@ func OwnerToken(gh string) (string, error) {
 func (c *Client) Login(token string) (string, error) {
 	var u User
 	return u.Login, c.do("GET", "/user", "token "+token, nil, &u)
+}
+
+// OpenIssue opens an issue with labels, as whoever token is, and returns
+// it.
+func (c *Client) OpenIssue(repo, title, body string, labels []string, token string) (*Issue, error) {
+	var i Issue
+	in := map[string]any{"title": title, "body": body, "labels": labels}
+	return &i, c.do("POST", "/repos/"+repo+"/issues", "token "+token, in, &i)
+}
+
+// CommentAs comments on an issue or pull request as whoever token is.
+func (c *Client) CommentAs(repo string, n int, body, token string) error {
+	return c.do("POST", fmt.Sprintf("/repos/%s/issues/%d/comments", repo, n), "token "+token, map[string]string{"body": body}, nil)
+}
+
+// Label puts labels on an issue as whoever token is.
+func (c *Client) Label(repo string, n int, labels []string, token string) error {
+	return c.do("POST", fmt.Sprintf("/repos/%s/issues/%d/labels", repo, n), "token "+token, map[string]any{"labels": labels}, nil)
+}
+
+// OpenIssues are a repository's open issues and pull requests, the most
+// recently updated first: one page, of 100.
+func (c *Client) OpenIssues(repo string) ([]Issue, error) {
+	var is []Issue
+	return is, c.call(repo, "GET", "/repos/"+repo+"/issues?state=open&sort=updated&direction=desc&per_page=100", nil, &is)
 }
 
 // Approve approves a pull request's head, as whoever token is.

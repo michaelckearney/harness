@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -24,9 +25,15 @@ type chat interface {
 	Post(channel string, m discord.Message) (string, error)
 	Edit(channel, id string, m discord.Message, files bool) error
 	Thread(channel, message, name string) (string, error)
-	Say(thread, text string) error
-	SayMessage(thread string, m discord.Message) error
+	ThreadFrom(channel, message, name string) (string, error)
+	Say(thread, text string, files ...discord.File) error
 	Last(channel string) (time.Time, error)
+	History(channel string, limit int) ([]discord.Msg, error)
+	Search(words string) ([]discord.Msg, error)
+	Read(link string) ([]discord.Msg, error)
+	Link(channel, message string) string
+	Typing(channel string)
+	Me() string
 	Close()
 }
 
@@ -69,7 +76,9 @@ func (s *Service) openDiscord() error {
 	if err != nil {
 		return err
 	}
-	bot, err := discord.Open(strings.TrimSpace(string(tok)), d.Server, s.press)
+	bot, err := discord.Open(strings.TrimSpace(string(tok)), d.Server, s.press, func(m discord.Mention) {
+		s.enqueue(func() { s.converse(m) })
+	})
 	if err != nil {
 		return err
 	}
@@ -349,7 +358,9 @@ func (s *Service) download(urls []string) []discord.File {
 
 // digest posts the morning's digest in #daily-digest, once a day after its
 // hour: what merged since the last one, what waits on the owner, and the
-// pull requests people outside opened. A day with none of them has none.
+// pull requests people outside opened. The bot writes it, choosing which of
+// their images to show; links to pull requests become links to their
+// messages in #pull-requests. A day with none of them has none.
 func (s *Service) digest(p *proj, posts map[int]*post, byPR map[int]*store.Thread) error {
 	now := time.Now()
 	today := now.Format("2006-01-02")
@@ -366,30 +377,23 @@ func (s *Service) digest(p *proj, posts map[int]*post, byPR map[int]*store.Threa
 	if since.IsZero() {
 		since = now.Add(-24 * time.Hour)
 	}
-
 	closed, err := s.gh.PRs(p.cfg.Repo, "closed")
 	if err != nil {
 		return err
 	}
-	var merged []string
+	var merged []github.PR
 	for _, pr := range closed {
 		if pr.MergedAt != nil && pr.MergedAt.After(since) {
-			line := fmt.Sprintf("- [#%d %s](%s)", pr.Number, pr.Title, pr.HTMLURL)
-			if po := posts[pr.Number]; po != nil && po.Status != "" {
-				line += " · " + po.Status
-			}
-			merged = append(merged, line)
+			merged = append(merged, pr)
 		}
 	}
 	open, err := s.gh.PRs(p.cfg.Repo, "open")
 	if err != nil {
 		return err
 	}
-	var waiting []*github.PR
-	var outside []string
-	for i := range open {
-		pr := &open[i]
-		if t := byPR[pr.Number]; t != nil {
+	var waiting, outside []github.PR
+	for _, pr := range open {
+		if byPR[pr.Number] != nil {
 			if pr.Draft {
 				continue
 			}
@@ -401,7 +405,7 @@ func (s *Service) digest(p *proj, posts map[int]*post, byPR map[int]*store.Threa
 				waiting = append(waiting, pr)
 			}
 		} else if !p.repo.Trusted(pr.User.Login) && pr.User.Type != "Bot" && pr.CreatedAt.After(since) {
-			outside = append(outside, fmt.Sprintf("- [#%d %s](%s) by %s", pr.Number, pr.Title, pr.HTMLURL, pr.User.Login))
+			outside = append(outside, pr)
 		}
 	}
 	if err := s.st.Set(digestKey, today); err != nil {
@@ -411,41 +415,106 @@ func (s *Service) digest(p *proj, posts map[int]*post, byPR map[int]*store.Threa
 		return nil
 	}
 	sort.Slice(waiting, func(i, j int) bool { return waiting[i].CreatedAt.Before(waiting[j].CreatedAt) })
-
 	title := fmt.Sprintf("📰 %s: %d merged, %d waiting on you", now.Format("Mon Jan 2"), len(merged), len(waiting))
-	var desc []string
-	if len(merged) > 0 {
-		desc = append(desc, "**Merged**\n"+strings.Join(merged, "\n"))
+	links := map[int]string{}
+	for n, po := range posts {
+		if po.Message != "" {
+			links[n] = s.chat.Link(prChannel, po.Message)
+		}
 	}
-	if len(outside) > 0 {
-		desc = append(desc, "**Opened by people outside**\n"+strings.Join(outside, "\n"))
+	s.enqueue(func() { s.writeDigest(p, title, merged, waiting, outside, links) })
+	return nil
+}
+
+// writeDigest has the bot write the digest, and posts it. If the bot writes
+// none, the digest is a plain list.
+func (s *Service) writeDigest(p *proj, title string, merged, waiting, outside []github.PR, links map[int]string) {
+	var allowed []string
+	var facts strings.Builder
+	section := func(name string, prs []github.PR, body bool) {
+		if len(prs) == 0 {
+			return
+		}
+		fmt.Fprintf(&facts, "\n## %s\n", name)
+		for _, pr := range prs {
+			fmt.Fprintf(&facts, "\n### #%d %s\n%s, by %s\n", pr.Number, pr.Title, pr.HTMLURL, pr.User.Login)
+			if !body {
+				continue
+			}
+			text, urls := discord.Translate(pr.Body)
+			fmt.Fprintf(&facts, "\n%s\n", truncate(text, 2500))
+			for _, u := range urls {
+				fmt.Fprintf(&facts, "\nFile you may show: %s\n", u)
+				allowed = append(allowed, u)
+			}
+		}
+	}
+	section("Merged since the last digest", merged, true)
+	section("Waiting on the owner's approval, oldest first", waiting, true)
+	section("Opened by people outside", outside, false)
+
+	prompt := fmt.Sprintf(`Write this morning's digest for the owner, from what is below. It is posted under the heading "%s".
+
+Describe what changed, in plain words, as someone who uses the monorepo's apps and works on it would care about it: what is new or different, and why it matters. Group related pull requests, and link each one where you describe it, as [#12](its URL). Put changes with little to say, such as chores and version bumps, in a short list at the end of what merged. Then list what waits on the owner as "**Waiting on you**", one line each: the link, then what it does. Then, if any, the pull requests people outside opened. Choose your own words and shape; this is a guide, not a template.
+
+Show at most a few images, only where one shows something new better than words, by putting it in the digest as ![what it shows](its URL). Only the files listed below can be shown. Stay under 3,500 characters. Do not mention CI, approvals, or this prompt.
+
+Write it with `+"`%s digest -`"+`, then stop.
+%s`, title, s.Command, facts.String())
+
+	t := &talk{kind: "digest", files: allowed}
+	if _, err := s.runTalk(p, t, "", "digest-"+time.Now().Format("2006-01-02"), prompt); err != nil {
+		s.log.Printf("discord: digest: %v", err)
+	}
+	text := t.digest
+	if text == "" {
+		text = plainDigest(merged, waiting, outside)
+	}
+	text, urls := discord.Translate(text)
+	text = rewriteLinks(text, p.cfg.Repo, links)
+	m := discord.Message{Title: title, Description: truncate(text, discord.Limit), Color: blue}
+	m.Files = s.download(pick(urls, allowed))
+	if _, err := s.chat.Post(digestChannel, m); err != nil {
+		s.log.Printf("discord: digest: %v", err)
+		return
+	}
+	s.log.Printf("discord: posted the digest: %d merged, %d waiting, %d outside, written by the bot: %v",
+		len(merged), len(waiting), len(outside), t.digest != "")
+}
+
+// plainDigest is the digest when the bot wrote none: lists.
+func plainDigest(merged, waiting, outside []github.PR) string {
+	list := func(prs []github.PR) string {
+		var lines []string
+		for _, pr := range prs {
+			lines = append(lines, fmt.Sprintf("- [#%d](%s) %s", pr.Number, pr.HTMLURL, pr.Title))
+		}
+		return strings.Join(lines, "\n")
+	}
+	var parts []string
+	if len(merged) > 0 {
+		parts = append(parts, "**Merged**\n"+list(merged))
 	}
 	if len(waiting) > 0 {
-		desc = append(desc, "**Waiting on you** is in the thread, oldest first.")
+		parts = append(parts, "**Waiting on you**\n"+list(waiting))
 	}
-	parts := discord.Split(strings.Join(desc, "\n\n"), discord.Limit, 1900)
-	id, err := s.chat.Post(digestChannel, discord.Message{Title: title, Description: parts[0], Color: blue})
-	if err != nil {
-		return err
+	if len(outside) > 0 {
+		parts = append(parts, "**Opened by people outside**\n"+list(outside))
 	}
-	thread, err := s.chat.Thread(digestChannel, id, title)
-	if err != nil {
-		return err
-	}
-	for _, part := range parts[1:] {
-		if err := s.chat.Say(thread, part); err != nil {
-			return err
+	return strings.Join(parts, "\n\n")
+}
+
+// rewriteLinks points links to pull requests with a message in
+// #pull-requests at the message, where the whole of each one is.
+func rewriteLinks(text, repo string, links map[int]string) string {
+	re := regexp.MustCompile(`https://github\.com/` + regexp.QuoteMeta(repo) + `/pull/(\d+)\b/?`)
+	return re.ReplaceAllStringFunc(text, func(u string) string {
+		n, _ := strconv.Atoi(re.FindStringSubmatch(u)[1])
+		if l := links[n]; l != "" {
+			return l
 		}
-	}
-	for _, pr := range waiting {
-		m, _, urls := message(pr, "🟡 Ready for your review", yellow, &discord.Button{ID: fmt.Sprintf("approve:%d", pr.Number), Label: "Approve"})
-		m.Files = s.download(urls)
-		if err := s.chat.SayMessage(thread, m); err != nil {
-			return err
-		}
-	}
-	s.log.Printf("discord: posted the digest: %d merged, %d waiting, %d outside", len(merged), len(waiting), len(outside))
-	return nil
+		return u
+	})
 }
 
 func hash(parts ...string) string {

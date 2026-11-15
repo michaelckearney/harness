@@ -127,6 +127,10 @@ func (s *Service) handle(req rpc.Request) rpc.Response {
 		out, err := s.queue()
 		return respond(out, err)
 	}
+	if p := s.projects[0]; s.inTalkDir(p, req.Cwd) {
+		out, err := s.handleTalk(p, req)
+		return respond(out, err)
+	}
 	s.mu.Lock()
 	p, t, err := s.threadFor(req.Cwd)
 	s.mu.Unlock()

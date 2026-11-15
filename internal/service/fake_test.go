@@ -186,6 +186,19 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		f.uploads = append(f.uploads, r.Header.Get("Authorization")+" "+q.Get("name")+" "+q.Get("content_type"))
 		reply(map[string]string{"url": fmt.Sprintf("https://github.test/user-attachments/assets/%d", len(f.uploads))})
+	case r.Method == "POST" && p == "/repos/"+f.repo+"/issues":
+		if r.Header.Get("Authorization") != "token owner-token" {
+			w.WriteHeader(403)
+			reply(map[string]any{"message": "only the owner opens issues here"})
+			return
+		}
+		n := int(f.id())
+		f.issues[n] = &fakeIssue{Number: n, Title: in["title"].(string), Body: in["body"].(string), State: "open", User: "owner", Created: time.Now()}
+		for _, l := range in["labels"].([]any) {
+			f.events[n] = append(f.events[n], map[string]any{"event": "labeled", "actor": map[string]string{"login": "owner"},
+				"created_at": time.Now().UTC().Format(time.RFC3339Nano), "label": map[string]string{"name": l.(string)}})
+		}
+		reply(f.issueJSON(f.issues[n]))
 	case r.Method == "GET" && p == "/repos/"+f.repo+"/issues":
 		var out []map[string]any
 		for _, i := range f.issues {
@@ -208,7 +221,12 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	case reComments.MatchString(p):
 		n := num(reComments)
 		if r.Method == "POST" {
-			f.comments[n] = append(f.comments[n], map[string]any{"id": f.id(), "user": map[string]string{"login": "harness-bot[bot]"},
+			// The owner's token is the owner's; any other is the App's.
+			user := "harness-bot[bot]"
+			if r.Header.Get("Authorization") == "token owner-token" {
+				user = "owner"
+			}
+			f.comments[n] = append(f.comments[n], map[string]any{"id": f.id(), "user": map[string]string{"login": user},
 				"body": in["body"], "created_at": time.Now().UTC().Format(time.RFC3339Nano)})
 			reply(map[string]any{})
 			return

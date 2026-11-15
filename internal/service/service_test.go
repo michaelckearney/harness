@@ -122,6 +122,15 @@ quiet)
 	;;
 silent)
 	;;
+discuss)
+	"$BS" issues > "$FAKE_DIR/issues" 2>&1
+	"$BS" search-discord dark mode > "$FAKE_DIR/search" 2>&1
+	printf 'feat: say hi\n\nAdd hi.txt, as we said.\n' | "$BS" open-issue -label framework - >> "$out" 2>&1
+	echo "Opened it." | "$BS" reply - >> "$out" 2>&1
+	;;
+digest)
+	printf 'Hello changed. See [#%s](https://github.com/o/r/pull/%s).\n' "$(cat "$FAKE_DIR/prn")" "$(cat "$FAKE_DIR/prn")" | "$BS" digest - >> "$out" 2>&1
+	;;
 esac
 `
 
