@@ -90,6 +90,7 @@ type Review struct {
 	Body        string    `json:"body"`
 	BodyHTML    string    `json:"body_html"`
 	State       string    `json:"state"`
+	CommitID    string    `json:"commit_id"` // the head it reviewed
 	HTMLURL     string    `json:"html_url"`
 	SubmittedAt time.Time `json:"submitted_at"`
 }
@@ -482,6 +483,13 @@ func (c *Client) CreatePR(repo, title, body, head, base string, draft bool) (*PR
 	var p PR
 	in := map[string]any{"title": title, "body": body, "head": head, "base": base, "draft": draft}
 	return &p, c.call(repo, "POST", "/repos/"+repo+"/pulls", in, &p)
+}
+
+// Merge squash-merges a pull request, titled as GitHub titles it, if its
+// head is still sha: a push since is refused, not merged unchecked.
+func (c *Client) Merge(repo string, n int, sha, title string) error {
+	in := map[string]any{"merge_method": "squash", "sha": sha, "commit_title": fmt.Sprintf("%s (#%d)", title, n)}
+	return c.call(repo, "PUT", fmt.Sprintf("/repos/%s/pulls/%d/merge", repo, n), in, nil)
 }
 
 func (c *Client) Reviews(repo string, pr int) ([]Review, error) {

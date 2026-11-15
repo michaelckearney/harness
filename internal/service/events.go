@@ -61,6 +61,10 @@ func (s *Service) events(p *proj, t *store.Thread, issue *github.Issue, pr *gith
 		return nil, err
 	}
 	for _, r := range reviews {
+		// An approval that says nothing is for the merge, not the bot.
+		if r.State == "APPROVED" && strings.TrimSpace(r.Body) == "" {
+			continue
+		}
 		if r.State != "PENDING" && trusted(r.User, r.SubmittedAt) {
 			text := fmt.Sprintf("@%s reviewed the pull request: %s", r.User.Login, strings.ToLower(strings.ReplaceAll(r.State, "_", " ")))
 			if r.Body != "" {

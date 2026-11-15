@@ -410,6 +410,7 @@ func (s *Service) poll(ctx context.Context, p *proj) error {
 			}
 		}
 	}
+	s.merge(p)
 	return nil
 }
 
