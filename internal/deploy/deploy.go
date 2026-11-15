@@ -44,6 +44,7 @@ const (
 	EnvCodexAuth   = "CODEX_AUTH_JSON"         // the auth.json that codex login writes, for ChatGPT
 	EnvModelKey    = "HARNESS_MODEL_API_KEY"   // the model endpoint's key, if it has one
 	EnvOwnerGhAuth = "HARNESS_OWNER_GH_TOKEN"
+	EnvDiscord     = "HARNESS_DISCORD_TOKEN" // the Discord bot's token
 )
 
 // Server is the server's file: what the service for one monorepo needs that
@@ -82,6 +83,13 @@ type Server struct {
 		// Allow are the Tailscale logins that may use it.
 		Allow []string `yaml:"allow"`
 	} `yaml:"api"`
+	// Discord is the monorepo's Discord server, whose bot's token is
+	// EnvDiscord. Off without a server.
+	Discord struct {
+		Server     string `yaml:"server"`
+		Owner      string `yaml:"owner"`
+		DigestHour int    `yaml:"digest_hour"`
+	} `yaml:"discord"`
 }
 
 var validUser = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
@@ -127,6 +135,9 @@ func (s *Server) check() error {
 	}
 	if slices.Contains(s.Agents, repo.OpenCode) && (s.Model.BaseURL == "" || s.Model.ID == "") {
 		return fmt.Errorf("model: opencode needs base_url and id, an OpenAI-compatible endpoint")
+	}
+	if (s.Discord.Server == "") != (s.Discord.Owner == "") {
+		return fmt.Errorf("discord: give server and owner, the owner's Discord user ID, or neither")
 	}
 	if s.API.Port < 0 || (s.API.Port > 0) != (len(s.API.Allow) > 0) {
 		return fmt.Errorf("api: give port and allow, the Tailscale logins that may use it, or neither")
@@ -333,6 +344,13 @@ func Files(repoName string, s *Server, author host.Author, env func(string) stri
 		tok := secret("owner-gh.token", t)
 		files = append(files, File{Name: "gh", Mode: 0o700, Data: []byte("#!/bin/sh\nGH_TOKEN=\"$(cat " + strings.Replace(tok, "~", "$HOME", 1) + ")\" exec gh \"$@\"\n")})
 		hc.Gh = dir + "/gh"
+	}
+	if s.Discord.Server != "" {
+		k := env(EnvDiscord)
+		if k == "" {
+			return nil, fmt.Errorf("discord.server is set, and %s is not", EnvDiscord)
+		}
+		hc.Discord = host.Discord{TokenFile: secret("discord.token", k), Server: s.Discord.Server, Owner: s.Discord.Owner, DigestHour: s.Discord.DigestHour}
 	}
 	if s.API.Port > 0 {
 		hc.API = host.API{Listen: fmt.Sprintf("tailnet:%d", s.API.Port), Allow: s.API.Allow}

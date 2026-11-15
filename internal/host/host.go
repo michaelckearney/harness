@@ -74,6 +74,23 @@ type Config struct {
 	// API is what the Slipway app reads. Off unless configured.
 	API    API    `yaml:"api"`
 	GitHub GitHub `yaml:"github"`
+	// Discord is the monorepo's Discord server. Off unless configured.
+	Discord Discord `yaml:"discord"`
+}
+
+// Discord is the monorepo's server: #pull-requests, with a live message
+// for each of the bots' pull requests, and #daily-digest.
+type Discord struct {
+	// TokenFile holds the bot's token.
+	TokenFile string `yaml:"token_file"`
+	// Server is the server's ID.
+	Server string `yaml:"server"`
+	// Owner is the owner's Discord user ID: the one person whose Approve
+	// approves, as the owner's gh login, and who is pinged.
+	Owner string `yaml:"owner"`
+	// DigestHour is the hour, on this server's clock, the digest is posted
+	// after: 8 by default.
+	DigestHour int `yaml:"digest_hour"`
 }
 
 // Model is an OpenAI-compatible endpoint.
@@ -246,6 +263,22 @@ func (c *Config) check() error {
 	if c.Author.Email == "" {
 		host, _ := os.Hostname()
 		c.Author.Email = "harness@" + host
+	}
+
+	if d := &c.Discord; d.TokenFile != "" || d.Server != "" || d.Owner != "" {
+		d.TokenFile = expand(d.TokenFile)
+		if d.Server == "" || d.Owner == "" {
+			return fmt.Errorf("discord: give token_file, server and owner")
+		}
+		if _, err := os.Stat(d.TokenFile); err != nil {
+			return fmt.Errorf("discord.token_file: %w", err)
+		}
+		if d.DigestHour == 0 {
+			d.DigestHour = 8
+		}
+		if d.DigestHour < 0 || d.DigestHour > 23 {
+			return fmt.Errorf("discord.digest_hour must be 0 to 23")
+		}
 	}
 
 	g := &c.GitHub

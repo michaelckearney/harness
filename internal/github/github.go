@@ -78,7 +78,11 @@ type PR struct {
 	Body     string     `json:"body"`
 	MergedAt *time.Time `json:"merged_at"`
 	HTMLURL  string     `json:"html_url"`
-	Head     struct {
+	// MergeCommit is the commit a merge made on the base branch.
+	MergeCommit string    `json:"merge_commit_sha"`
+	User        User      `json:"user"`
+	CreatedAt   time.Time `json:"created_at"`
+	Head        struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	} `json:"head"`
@@ -384,8 +388,8 @@ func (c *Client) Upload(repo string, u Upload) error {
 	return c.Comment(repo, u.N, body)
 }
 
-// contentTypes are the files GitHub takes as attachments.
-var contentTypes = map[string]string{
+// ContentTypes are the files GitHub takes as attachments, by extension.
+var ContentTypes = map[string]string{
 	".png": "image/png", ".gif": "image/gif", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 	".svg": "image/svg+xml", ".webp": "image/webp",
 	".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
@@ -394,7 +398,7 @@ var contentTypes = map[string]string{
 // uploadFile sends one file to the endpoint gh's --attach uses and returns
 // the URL to show it by.
 func (c *Client) uploadFile(auth string, repoID int64, file string) (string, error) {
-	ct := contentTypes[strings.ToLower(filepath.Ext(file))]
+	ct := ContentTypes[strings.ToLower(filepath.Ext(file))]
 	if ct == "" {
 		return "", fmt.Errorf("GitHub does not take %s files", filepath.Ext(file))
 	}
@@ -454,7 +458,7 @@ func (c *Client) uploads() string {
 // line; as an image it would be a broken picture.
 func linkFile(body, file, asset string) string {
 	ref := regexp.MustCompile(`!\[([^\]]*)\]\(\s*<?` + regexp.QuoteMeta(file) + `>?(\s+"[^"]*")?\s*\)`)
-	video := strings.HasPrefix(contentTypes[strings.ToLower(filepath.Ext(file))], "video/")
+	video := strings.HasPrefix(ContentTypes[strings.ToLower(filepath.Ext(file))], "video/")
 	return ref.ReplaceAllStringFunc(body, func(m string) string {
 		if video {
 			return asset
@@ -490,6 +494,48 @@ func (c *Client) CreatePR(repo, title, body, head, base string, draft bool) (*PR
 func (c *Client) Merge(repo string, n int, sha, title string) error {
 	in := map[string]any{"merge_method": "squash", "sha": sha, "commit_title": fmt.Sprintf("%s (#%d)", title, n)}
 	return c.call(repo, "PUT", fmt.Sprintf("/repos/%s/pulls/%d/merge", repo, n), in, nil)
+}
+
+// PRs are a repository's pull requests in a state, open or closed, the
+// most recently updated first: one page, of 100.
+func (c *Client) PRs(repo, state string) ([]PR, error) {
+	var prs []PR
+	return prs, c.call(repo, "GET", fmt.Sprintf("/repos/%s/pulls?state=%s&sort=updated&direction=desc&per_page=100", repo, state), nil, &prs)
+}
+
+// Tag is a tag, and the commit it is on.
+type Tag struct {
+	Name   string `json:"name"`
+	Commit struct {
+		SHA string `json:"sha"`
+	} `json:"commit"`
+}
+
+// Tags are a repository's newest tags: one page, of 100.
+func (c *Client) Tags(repo string) ([]Tag, error) {
+	var tags []Tag
+	return tags, c.call(repo, "GET", "/repos/"+repo+"/tags?per_page=100", nil, &tags)
+}
+
+// OwnerToken is the owner's gh login's token: for what the service does
+// as the owner, such as approving, which the App cannot.
+func OwnerToken(gh string) (string, error) {
+	out, err := exec.Command(gh, "auth", "token").Output()
+	if err != nil {
+		return "", fmt.Errorf("the owner's gh login: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// Login is whose a token is.
+func (c *Client) Login(token string) (string, error) {
+	var u User
+	return u.Login, c.do("GET", "/user", "token "+token, nil, &u)
+}
+
+// Approve approves a pull request's head, as whoever token is.
+func (c *Client) Approve(repo string, n int, token string) error {
+	return c.do("POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, n), "token "+token, map[string]string{"event": "APPROVE"}, nil)
 }
 
 func (c *Client) Reviews(repo string, pr int) ([]Review, error) {
