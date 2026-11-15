@@ -230,6 +230,7 @@ bot_user: harness-bot        # optional: who the agents run as
 model: { base_url: http://127.0.0.1:8000/v1, id: qwen3.6, vision: true }
 github: { app_id: 123456 }   # the GitHub App the bots post as
 api: { port: 7420, allow: [me@example.com] }   # optional: the Slipway app, on the tailnet
+discord: { server: "123", owner: "456" }       # optional: the monorepo's Discord server; see Discord
 ```
 
 ```bash
@@ -242,8 +243,9 @@ not come back on the new version is put back as it was. The secrets come
 from its environment: `HARNESS_GITHUB_APP_KEY`, and as the server's agents
 need them `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`),
 `CODEX_AUTH_JSON` (the `~/.codex/auth.json` that `codex login` writes),
-`HARNESS_MODEL_API_KEY`, and `HARNESS_OWNER_GH_TOKEN` (for uploading the
-bots' images: GitHub's upload endpoint refuses App tokens). The bots'
+`HARNESS_MODEL_API_KEY`, `HARNESS_OWNER_GH_TOKEN` (for uploading the
+bots' images: GitHub's upload endpoint refuses App tokens), and
+`HARNESS_DISCORD_TOKEN` (the Discord bot's). The bots'
 commits are by `harness`, with the GitHub noreply address of the monorepo's
 owner. It needs on the server: Linux with systemd, git, and the agents'
 commands; and passwordless sudo for `bot_user`. What else the machine
@@ -270,6 +272,28 @@ systemctl --user status harness-<repo>
 journalctl --user -u harness-<repo> -f
 harness queue --config ~/.config/harness/<repo>/host.yaml
 ```
+
+### Discord
+
+With `discord` in the server's file, the service is the bot in the
+monorepo's Discord server: `server` is the server's ID, and `owner` the
+owner's Discord user ID. The server needs the text channels
+`#pull-requests` and `#daily-digest`, and the bot the permissions to post,
+attach files, and start threads in them.
+
+- **#pull-requests** has a message for each of the bots' pull requests,
+  edited as it goes: where it is (the bot working on it, ready for review,
+  approved and what the merge waits on, merged, released or failed), its
+  description, the images and videos in it, and **Approve**. A thread under
+  it says each change, and pings the owner when its release fails.
+- **Approve** is the owner's alone, and approves as the owner's gh login,
+  as approving on GitHub does: the App cannot approve its own pull requests.
+- **#daily-digest** has, each morning after `digest_hour` (8 on the
+  server's clock), what merged since the last digest, the bots' pull
+  requests waiting on the owner, with Approve, and the pull requests people
+  outside opened. A day with none of them has none.
+
+Without Discord, or when it cannot be reached, the bots work as before.
 
 ## Pipelines
 

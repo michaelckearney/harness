@@ -141,7 +141,10 @@ func (f *fakeGitHub) prJSON(p *fakePR) map[string]any {
 		"html_url": fmt.Sprintf("https://github.test/%s/pull/%d", f.repo, p.Number)}
 	if p.Merged {
 		j["merged_at"] = time.Now().UTC().Format(time.RFC3339)
+		j["merge_commit_sha"] = f.sha(p.Base)
 	}
+	j["user"] = map[string]string{"login": "harness-bot[bot]", "type": "Bot"}
+	j["created_at"] = time.Now().UTC().Format(time.RFC3339)
 	j["head"] = map[string]string{"ref": p.Head, "sha": f.sha(p.Head)}
 	return j
 }
@@ -216,10 +219,10 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		reply(out)
 	case r.Method == "GET" && p == "/repos/"+f.repo+"/pulls":
-		head := r.URL.Query().Get("head")
+		head, state := r.URL.Query().Get("head"), r.URL.Query().Get("state")
 		out := []map[string]any{}
 		for _, pr := range f.prs {
-			if strings.HasSuffix(head, ":"+pr.Head) {
+			if head != "" && strings.HasSuffix(head, ":"+pr.Head) || head == "" && pr.State == state {
 				out = append(out, f.prJSON(pr))
 			}
 		}
@@ -264,6 +267,19 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		pr.State, pr.Merged = "closed", true
 		f.merges = append(f.merges, fmt.Sprintf("%d %s %s", pr.Number, head, in["commit_title"]))
 		reply(map[string]any{"merged": true})
+	case r.Method == "POST" && reReviews.MatchString(p):
+		// The owner's token is the owner's.
+		if r.Header.Get("Authorization") != "token owner-token" || in["event"] != "APPROVE" {
+			w.WriteHeader(403)
+			reply(map[string]any{"message": "no"})
+			return
+		}
+		n := num(reReviews)
+		f.reviews[n] = append(f.reviews[n], map[string]any{"id": f.id(), "user": map[string]string{"login": "owner"},
+			"state": "APPROVED", "body": "", "commit_id": f.sha(f.prs[n].Head), "submitted_at": time.Now().UTC().Format(time.RFC3339Nano)})
+		reply(map[string]any{})
+	case r.Method == "GET" && p == "/repos/"+f.repo+"/tags":
+		reply([]any{})
 	case r.Method == "GET" && reReviews.MatchString(p):
 		out := f.reviews[num(reReviews)]
 		if out == nil {
@@ -316,7 +332,7 @@ func (f *fakeGitHub) review(pr int, user, state, body string) {
 	f.reviews[pr] = append(f.reviews[pr], map[string]any{"id": id, "user": map[string]string{"login": user},
 		"state": state, "body": body, "commit_id": f.sha(f.prs[pr].Head),
 		"submitted_at": time.Now().UTC().Format(time.RFC3339Nano),
-		"html_url": fmt.Sprintf("https://github.test/%s/pull/%d#pullrequestreview-%d", f.repo, pr, id)})
+		"html_url":     fmt.Sprintf("https://github.test/%s/pull/%d#pullrequestreview-%d", f.repo, pr, id)})
 }
 
 // pass has every check pass on a branch's head.

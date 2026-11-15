@@ -52,6 +52,8 @@ type Service struct {
 	// service updates itself to must accept. Without it, it never updates.
 	ConfigPath string
 	tried      map[string]time.Time // the versions selfUpdate tried, by when
+	// chat is the monorepo's Discord server, or nil without one.
+	chat chat
 }
 
 // projCfg is the monorepo, as the host configuration has it.
@@ -127,6 +129,15 @@ func (s *Service) Run(ctx context.Context, stop <-chan struct{}) error {
 		return err
 	}
 	defer func() { s.unlisten(ln) }()
+	// Without Discord the bots still work: it is only told what they do.
+	if err := s.openDiscord(); err != nil {
+		s.log.Printf("discord: %v", err)
+	}
+	defer func() {
+		if s.chat != nil {
+			s.chat.Close()
+		}
+	}()
 	go s.serve(ln)
 
 	// Turns outlive ctx: when it ends they are left to finish (see drain).
@@ -411,6 +422,7 @@ func (s *Service) poll(ctx context.Context, p *proj) error {
 		}
 	}
 	s.merge(p)
+	s.notify(p)
 	return nil
 }
 
