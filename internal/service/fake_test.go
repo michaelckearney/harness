@@ -131,9 +131,45 @@ func (f *fakeGitHub) sha(branch string) string {
 }
 
 func (f *fakeGitHub) issueJSON(i *fakeIssue) map[string]any {
-	return map[string]any{"number": i.Number, "title": i.Title, "body": i.Body, "state": i.State,
+	// An issue's labels are what its events left on it.
+	on := map[string]bool{}
+	var names []string
+	for _, e := range f.events[i.Number] {
+		name := e["label"].(map[string]string)["name"]
+		if e["event"] == "labeled" && !on[name] {
+			names = append(names, name)
+		}
+		on[name] = e["event"] == "labeled"
+	}
+	labels := []map[string]string{}
+	for _, n := range names {
+		if on[n] {
+			labels = append(labels, map[string]string{"name": n})
+		}
+	}
+	return map[string]any{"number": i.Number, "title": i.Title, "body": i.Body, "state": i.State, "labels": labels,
 		"user": map[string]string{"login": i.User}, "html_url": fmt.Sprintf("https://github.test/%s/issues/%d", f.repo, i.Number),
 		"created_at": i.Created.UTC().Format(time.RFC3339Nano), "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}
+}
+
+// close closes an issue.
+func (f *fakeGitHub) close(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issues[n].State = "closed"
+}
+
+// issuesTitled are the issues with a title, as the fake has them.
+func (f *fakeGitHub) issuesTitled(title string) []fakeIssue {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []fakeIssue
+	for _, i := range f.issues {
+		if i.Title == title {
+			out = append(out, *i)
+		}
+	}
+	return out
 }
 
 func (f *fakeGitHub) prJSON(p *fakePR) map[string]any {
@@ -202,6 +238,9 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && p == "/repos/"+f.repo+"/issues":
 		var out []map[string]any
 		for _, i := range f.issues {
+			if r.URL.Query().Get("state") == "open" && i.State != "open" {
+				continue
+			}
 			out = append(out, f.issueJSON(i))
 		}
 		reply(out)

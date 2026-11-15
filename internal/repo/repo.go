@@ -12,6 +12,8 @@
 //	  allowed: [opencode, claude-code, codex]
 //	projects:
 //	  harbor: projects/harbor
+//	tasks:
+//	  design: { prompt: tasks/design.md, before: harness test -e2e, label: design, max_open: 2 }
 //
 // The framework is always in framework/, with its framework.yaml: a monorepo
 // has one.
@@ -81,6 +83,27 @@ type Config struct {
 	OldServers any `yaml:"servers"`
 	// Projects are the folders the framework builds, by name.
 	Projects map[string]*Project `yaml:"projects"`
+	// Tasks are the monorepo's recurring work, by name.
+	Tasks map[string]*Task `yaml:"tasks"`
+}
+
+// Task is work the bots take up again and again, as the monorepo's prompt
+// says: each run opens one issue at most, which the bots then work like any
+// other. It has no schedule. Its open issues are its limit: a run starts
+// whenever fewer than MaxOpen open issues carry Label.
+type Task struct {
+	// Prompt is the file, relative to the root, that tells the agent what
+	// the task is.
+	Prompt string `yaml:"prompt"`
+	// Before is a shell command run on the checkout before the agent starts,
+	// such as harness test -e2e for the screenshots it leaves. If it fails,
+	// the run stops there.
+	Before string `yaml:"before"`
+	// Label is put on every issue the task opens.
+	Label string `yaml:"label"`
+	// MaxOpen is how many of the task's issues may be open at once: 0
+	// pauses it.
+	MaxOpen *int `yaml:"max_open"`
 }
 
 // Agents says which agents the bots may be.
@@ -197,6 +220,31 @@ func (c *Config) check() error {
 		}
 		p.Path = path.Clean(p.Path)
 	}
+	labels := map[string]string{}
+	for _, name := range sortedKeys(c.Tasks) {
+		t := c.Tasks[name]
+		what := "tasks." + name
+		switch {
+		case !validName.MatchString(name):
+			return fail("tasks: %q must be lowercase letters, digits, '-' or '_'", name)
+		case t == nil:
+			return fail("%s: give its prompt, label, and max_open", what)
+		case t.Prompt == "" || path.IsAbs(t.Prompt) || strings.HasPrefix(path.Clean(t.Prompt), ".."):
+			return fail("%s.prompt: give the file that says what the task is, inside the repository", what)
+		case t.Label == "":
+			return fail("%s.label: give the label its issues get", what)
+		case t.Label == FrameworkKind || strings.HasPrefix(t.Label, ProjectKind+":") || strings.HasPrefix(t.Label, "agent:"):
+			return fail("%s.label: %q picks a scope or an agent; give the task a label of its own", what, t.Label)
+		case labels[t.Label] != "":
+			return fail("%s.label: %q is tasks.%s's too; each task counts its own issues", what, t.Label, labels[t.Label])
+		case t.MaxOpen == nil:
+			return fail("%s.max_open: say how many of its issues may be open at once; 0 pauses it", what)
+		case *t.MaxOpen < 0:
+			return fail("%s.max_open must be 0 or more", what)
+		}
+		labels[t.Label] = name
+		t.Prompt = path.Clean(t.Prompt)
+	}
 	return nil
 }
 
@@ -247,3 +295,6 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // ProjectNames are the projects, sorted.
 func (c *Config) ProjectNames() []string { return sortedKeys(c.Projects) }
+
+// TaskNames are the tasks, sorted.
+func (c *Config) TaskNames() []string { return sortedKeys(c.Tasks) }

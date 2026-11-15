@@ -128,6 +128,20 @@ discuss)
 	printf 'feat: say hi\n\nAdd hi.txt, as we said.\n' | "$BS" open-issue -label framework - >> "$out" 2>&1
 	echo "Opened it." | "$BS" reply - >> "$out" 2>&1
 	;;
+task)
+	"$BS" status > "$FAKE_DIR/task-status" 2>&1
+	ls shots > "$FAKE_DIR/task-shots" 2>&1
+	printf 'feat: tidy the header\n\nThe header has two lines; make it one.\n' | "$BS" open-issue -label design - >> "$out" 2>&1
+	printf 'feat: tidy the header\n\nThe header has two lines; make it one.\n' | "$BS" open-issue -label framework -label project:app - >> "$out" 2>&1
+	printf 'feat: tidy the header\n\nThe header has two lines; make it one.\n' | "$BS" open-issue -label framework - >> "$out" 2>&1
+	printf 'feat: another\n\nMore.\n' | "$BS" open-issue -label framework - >> "$out" 2>&1
+	echo "Done." | "$BS" reply - >> "$out" 2>&1
+	echo "Me too." | "$BS" comment 1 - >> "$out" 2>&1
+	"$BS" done >> "$out" 2>&1
+	;;
+nothing)
+	"$BS" done >> "$out" 2>&1
+	;;
 digest)
 	printf 'Hello changed. See [#%s](https://github.com/o/r/pull/%s).\n' "$(cat "$FAKE_DIR/prn")" "$(cat "$FAKE_DIR/prn")" | "$BS" digest - >> "$out" 2>&1
 	;;

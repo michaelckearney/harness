@@ -58,6 +58,8 @@ type Service struct {
 	// the one running.
 	jobs    chan func()
 	talking *talk
+	// queued are the tasks with a run waiting or running, by name.
+	queued map[string]bool
 }
 
 // projCfg is the monorepo, as the host configuration has it.
@@ -433,6 +435,7 @@ func (s *Service) poll(ctx context.Context, p *proj) error {
 	}
 	s.merge(p)
 	s.notify(p)
+	s.tasks(p)
 	return nil
 }
 

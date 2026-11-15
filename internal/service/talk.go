@@ -23,15 +23,19 @@ import (
 //go:embed talk.md
 var talkInstructions string
 
-// talk is a turn the bot takes in Discord: a conversation it was mentioned
-// in, or the morning's digest. One runs at a time.
+// talk is a turn the bot takes on the Discord checkout: a conversation it
+// was mentioned in, the morning's digest, or a run of one of the monorepo's
+// tasks. One runs at a time.
 type talk struct {
-	kind    string // "conversation" or "digest"
+	kind    string // "conversation", "digest", or "task"
 	thread  string // the Discord thread a conversation's replies go to
 	owner   bool   // the owner mentioned the bot: it may change GitHub
 	replied bool
 	digest  string   // the digest the bot wrote
 	files   []string // the files a digest may show
+	task    string   // the task a run is of
+	label   string   // the label the task's issues get
+	opened  int      // the issue a task's run opened
 }
 
 // conv is what the service keeps of a conversation between turns.
@@ -48,17 +52,19 @@ func (s *Service) talkDir(p *proj) string {
 	return filepath.Join(s.cfg.StateDir, "worktrees", p.cfg.Repo, "discord")
 }
 
-// enqueue runs a Discord turn after the ones before it. Without the worker,
-// as in tests, it runs now.
-func (s *Service) enqueue(job func()) {
+// enqueue runs a Discord turn after the ones before it, and reports whether
+// it will. Without the worker, as in tests, it runs now.
+func (s *Service) enqueue(job func()) bool {
 	if s.jobs == nil {
 		job()
-		return
+		return true
 	}
 	select {
 	case s.jobs <- job:
+		return true
 	default:
 		s.log.Printf("discord: too much to do; dropped a turn")
+		return false
 	}
 }
 
@@ -109,14 +115,19 @@ func (s *Service) prepareTalk(p *proj) error {
 	return err
 }
 
-// runTalk runs one Discord turn with the talking agent.
+// runTalk runs one Discord turn with the talking agent, on a fresh checkout.
 func (s *Service) runTalk(p *proj, t *talk, session, title, prompt string) (string, error) {
+	if err := s.prepareTalk(p); err != nil {
+		return "", fmt.Errorf("checking out %s: %w", p.base, err)
+	}
+	return s.talkTurn(p, t, session, title, prompt)
+}
+
+// talkTurn runs one Discord turn on the checkout as it is.
+func (s *Service) talkTurn(p *proj, t *talk, session, title, prompt string) (string, error) {
 	a := s.talkAgent(p)
 	if a == nil {
 		return "", fmt.Errorf("this server runs no agent")
-	}
-	if err := s.prepareTalk(p); err != nil {
-		return "", fmt.Errorf("checking out %s: %w", p.base, err)
 	}
 	s.mu.Lock()
 	s.talking = t
@@ -129,16 +140,21 @@ func (s *Service) runTalk(p *proj, t *talk, session, title, prompt string) (stri
 	ctx, cancel := context.WithTimeout(context.Background(), talkTimeout)
 	defer cancel()
 	return a.Run(ctx, agents.Turn{
-		Dir: s.talkDir(p), Session: session, Title: title, Prompt: prompt, System: s.talkSystem(p),
+		Dir: s.talkDir(p), Session: session, Title: title, Prompt: prompt, System: s.talkSystem(p, t.kind),
 		Say: func(kind, text string) { s.log.Printf("discord: %s: [%s] %s", title, kind, compactLine(text)) },
 	})
 }
 
-// talkSystem is the instructions for a Discord turn: the harness's, then
-// the monorepo's own AGENTS.md and the framework's, read as files.
-func (s *Service) talkSystem(p *proj) string {
+// talkSystem is the instructions for a Discord turn: the harness's, for a
+// conversation and the digest or for a task, then the monorepo's own
+// AGENTS.md and the framework's, read as files.
+func (s *Service) talkSystem(p *proj, kind string) string {
 	var b strings.Builder
-	b.WriteString(strings.ReplaceAll(talkInstructions, "$HARNESS", s.Command))
+	instructions := talkInstructions
+	if kind == "task" {
+		instructions = taskInstructions
+	}
+	b.WriteString(strings.ReplaceAll(instructions, "$HARNESS", s.Command))
 	s.mu.Lock()
 	cfg := p.repo
 	s.mu.Unlock()
@@ -307,6 +323,9 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		return "", fixable("there is no Discord turn running; the harness only acts during one")
 	}
 	needOwner := func() error {
+		if t.kind == "task" {
+			return fixable("a task opens issues, and changes nothing else on GitHub")
+		}
 		if t.kind != "conversation" || !t.owner {
 			return fixable("only the owner can have you change GitHub, and the owner did not ask this turn; say what you would do instead, for them to confirm")
 		}
@@ -323,15 +342,35 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		return n, nil
 	}
 	footer := ""
-	if t.thread != "" {
+	switch {
+	case t.thread != "":
 		footer = fmt.Sprintf("\n\n---\n<sub>From a [conversation in Discord](https://discord.com/channels/%s/%s).</sub>", s.cfg.Discord.Server, t.thread)
+	case t.kind == "task":
+		footer = fmt.Sprintf("\n\n---\n<sub>From the %s task.</sub>", t.task)
+	}
+	discordOnly := func() error {
+		if s.chat == nil {
+			return fixable("this monorepo has no Discord server")
+		}
+		return nil
 	}
 	switch req.Cmd {
 	case "status", "help":
+		if t.kind == "task" {
+			return taskCommands, nil
+		}
 		return talkCommands, nil
 	case "done":
 		return "Turn ended. Stop here.", nil
+	case "scope":
+		// A framework verb run here, such as record, is for the framework
+		// and every project, unless it names one with -p.
+		data, err := json.Marshal(s.scopeOf(p, repo.FrameworkKind))
+		return string(data), err
 	case "reply":
+		if t.kind == "task" {
+			return "", fixable("a task has nobody to reply to: open an issue, or end the turn with done")
+		}
 		if t.kind != "conversation" {
 			return "", fixable("this is the digest: write it with digest -, not reply")
 		}
@@ -374,6 +413,9 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		}
 		return s.describeIssue(p, n)
 	case "search-discord":
+		if err := discordOnly(); err != nil {
+			return "", err
+		}
 		if len(req.Args) == 0 {
 			return "", fixable("say what to search for: harness search-discord dark mode")
 		}
@@ -391,6 +433,9 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		}
 		return strings.Join(lines, "\n") + "\n\nRead a whole conversation with read-discord <link>.", nil
 	case "read-discord":
+		if err := discordOnly(); err != nil {
+			return "", err
+		}
 		if len(req.Args) != 1 {
 			return "", fixable("give one link: harness read-discord https://discord.com/channels/...")
 		}
@@ -404,8 +449,10 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		}
 		return strings.Join(lines, "\n"), nil
 	case "open-issue":
-		if err := needOwner(); err != nil {
-			return "", err
+		if t.kind != "task" {
+			if err := needOwner(); err != nil {
+				return "", err
+			}
 		}
 		title, body, _ := strings.Cut(strings.TrimSpace(req.Body), "\n")
 		if strings.TrimSpace(title) == "" {
@@ -420,6 +467,12 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 				}
 			}
 		}
+		if t.kind == "task" {
+			var err error
+			if labels, err = s.taskLabels(p, t, labels); err != nil {
+				return "", err
+			}
+		}
 		tok, err := github.OwnerToken(s.cfg.Gh)
 		if err != nil {
 			return "", err
@@ -427,6 +480,11 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		issue, err := s.gh.OpenIssue(p.cfg.Repo, strings.TrimSpace(title), strings.TrimSpace(body)+footer, labels, tok)
 		if err != nil {
 			return "", err
+		}
+		if t.kind == "task" {
+			t.opened = issue.Number
+			s.log.Printf("task %s: opened #%d: %s", t.task, issue.Number, title)
+			return fmt.Sprintf("Opened #%d: %s\nA bot starts on it soon. End the turn with done.", issue.Number, issue.HTMLURL), nil
 		}
 		s.log.Printf("discord: opened #%d for the owner: %s", issue.Number, title)
 		msg := fmt.Sprintf("Opened #%d: %s", issue.Number, issue.HTMLURL)
