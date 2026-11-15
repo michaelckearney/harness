@@ -54,6 +54,10 @@ type Service struct {
 	tried      map[string]time.Time // the versions selfUpdate tried, by when
 	// chat is the monorepo's Discord server, or nil without one.
 	chat chat
+	// jobs are the Discord turns waiting, run one at a time; talking is
+	// the one running.
+	jobs    chan func()
+	talking *talk
 }
 
 // projCfg is the monorepo, as the host configuration has it.
@@ -130,6 +134,12 @@ func (s *Service) Run(ctx context.Context, stop <-chan struct{}) error {
 	}
 	defer func() { s.unlisten(ln) }()
 	// Without Discord the bots still work: it is only told what they do.
+	s.jobs = make(chan func(), 32)
+	go func() {
+		for job := range s.jobs {
+			job()
+		}
+	}()
 	if err := s.openDiscord(); err != nil {
 		s.log.Printf("discord: %v", err)
 	}

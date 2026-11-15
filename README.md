@@ -289,9 +289,20 @@ attach files, and start threads in them.
 - **Approve** is the owner's alone, and approves as the owner's gh login,
   as approving on GitHub does: the App cannot approve its own pull requests.
 - **#daily-digest** has, each morning after `digest_hour` (8 on the
-  server's clock), what merged since the last digest, the bots' pull
-  requests waiting on the owner, with Approve, and the pull requests people
-  outside opened. A day with none of them has none.
+  server's clock), a digest the bot writes: what merged since the last one,
+  described rather than listed, with the few images worth showing, then
+  what waits on the owner, and the pull requests people outside opened.
+  Its links to pull requests open their messages in #pull-requests, where
+  Approve is. If the bot writes none, it is a plain list. A day with none
+  of them has none.
+- **Mention the bot** anywhere in the server and it answers in a thread:
+  the one it was mentioned in, or one it starts under the message. It
+  reads the conversation, a checkout of the default branch, the issues and
+  pull requests, and earlier discussions in the server, which it can
+  search. When the owner tells it to, it opens issues, comments, and
+  labels on GitHub as the owner, so the bots take them as the owner's word;
+  in a conversation someone else started, it can only say what it would
+  do. One Discord turn runs at a time, with the monorepo's default agent.
 
 Without Discord, or when it cannot be reached, the bots work as before.
 
