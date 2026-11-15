@@ -34,13 +34,16 @@ agents:
 prepare: go mod download     # optional: run in a bot's worktree before each turn
 projects:
   harbor: projects/harbor    # each project's folder
+tasks:                       # optional: recurring work; see Tasks
+  design: { prompt: tasks/design.md, before: harness test -e2e, label: design, max_open: 2 }
 ```
 
 The framework is always in `framework/`. Nothing in it is about a machine:
 the servers, the model, the GitHub App and the keys are each server's own
 (see [Servers](#servers)), so a monorepo can be public.
 
-`harness check` checks it, and that the framework and each project are there.
+`harness check` checks it, and that the framework, each project, and each
+task's prompt are there.
 
 ## Verbs
 
@@ -173,6 +176,41 @@ In a turn, `harness test` with no arguments tests what the issue's branch
 changed: the projects it changed, or, when it changed anything else, the
 framework and every project. A full run of that counts for `done`. Each
 pull request's CI tests everything.
+
+### Tasks
+
+A task is recurring work the monorepo describes in its own words, such as
+proposing one improvement to its apps at a time. The harness knows nothing
+of what a task does: it runs it, and the task's prompt says the rest.
+
+```yaml
+tasks:
+  design:
+    prompt: tasks/design.md      # what the task is, for the agent
+    before: harness test -e2e    # optional: runs first; the agent sees what it leaves
+    label: design                # every issue the task opens gets it
+    max_open: 2                  # how many of those may be open at once; 0 pauses it
+```
+
+A task has no schedule. Its open issues are its limit: whenever fewer than
+`max_open` open issues carry its label, the service starts a run. So new
+work comes as fast as the old is merged or closed.
+
+- A run is a turn of the default agent on the Discord checkout (see
+  Discord), in the queue Discord's turns share, so it holds them up while it
+  runs, `before` included. It needs no Discord server.
+- `before` runs first, with the server's environment, as `prepare` does. If
+  it fails, the run stops, and #daily-digest says so.
+- The agent can read the checkout and the issues, search Discord, run the
+  framework's verbs for a turn with `-p <project>` (such as `record`), and
+  open one issue, as the owner, with exactly one scope label; the task's
+  label is added. A bot then works it like any other issue. It cannot
+  comment, label, or reply.
+- A run that opens no issue, because there was nothing worth doing or
+  `before` failed, is not tried again until the default branch moves on.
+
+The owner's approval of a change to harness.yaml is what lets a task open
+issues as the owner.
 
 ### What keeps the bots in their place
 

@@ -23,6 +23,13 @@ func TestParse(t *testing.T) {
 	if c.Framework != "framework" || c.Projects["harbor"].Path != "projects/harbor" {
 		t.Errorf("framework and projects: %s %+v", c.Framework, c.Projects)
 	}
+	c, err = Parse([]byte(strings.Replace(good, "projects:", "tasks:\n  design: { prompt: ./tasks/design.md, before: harness test -e2e, label: design, max_open: 2 }\nprojects:", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := c.Tasks["design"]; d.Prompt != "tasks/design.md" || d.Before != "harness test -e2e" || d.Label != "design" || *d.MaxOpen != 2 {
+		t.Errorf("the task: %+v", d)
+	}
 	for _, bad := range []struct{ change, want string }{
 		{"projects:|servers: {}\nprojects:", "servers: is gone"},
 		{"projects:|model: { id: m }\nprojects:", "model: is gone"},
@@ -32,6 +39,13 @@ func TestParse(t *testing.T) {
 		{"projects:|framework: framework\nprojects:", "framework: is gone"},
 		{"triggers: [owner]|triggers: []", "triggers"},
 		{"schema: 1|schema: 1\nextra: 1", "extra"},
+		{"projects:|tasks: { design: { prompt: d.md, label: design } }\nprojects:", "max_open"},
+		{"projects:|tasks: { design: { prompt: d.md, label: framework, max_open: 1 } }\nprojects:", "picks a scope"},
+		{"projects:|tasks: { design: { prompt: d.md, label: project:harbor, max_open: 1 } }\nprojects:", "picks a scope"},
+		{"projects:|tasks: { design: { label: design, max_open: 1 } }\nprojects:", "prompt"},
+		{"projects:|tasks: { design: { prompt: ../d.md, label: design, max_open: 1 } }\nprojects:", "inside the repository"},
+		{"projects:|tasks: { design: { prompt: d.md, label: design, max_open: -1 } }\nprojects:", "0 or more"},
+		{"projects:|tasks: { a: { prompt: a.md, label: x, max_open: 1 }, b: { prompt: b.md, label: x, max_open: 1 } }\nprojects:", "each task counts"},
 	} {
 		from, to, _ := strings.Cut(bad.change, "|")
 		if _, err := Parse([]byte(strings.Replace(good, from, to, 1))); err == nil || !strings.Contains(err.Error(), bad.want) {

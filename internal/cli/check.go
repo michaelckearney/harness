@@ -13,7 +13,8 @@ import (
 )
 
 // Check runs `harness check`: harness.yaml is valid, the framework has a
-// valid framework.yaml, and each project's folder is there.
+// valid framework.yaml, each project's folder is there, and each task's
+// prompt.
 func Check(out io.Writer) error {
 	cwd, _ := os.Getwd()
 	root, err := repo.FindRoot(cwd)
@@ -40,6 +41,14 @@ func Check(out io.Writer) error {
 			continue
 		}
 		fmt.Fprintf(out, "project   %-12s %s\n", name, p.Path)
+	}
+	for _, name := range cfg.TaskNames() {
+		t := cfg.Tasks[name]
+		if info, err := os.Stat(filepath.Join(root, t.Prompt)); err != nil || !info.Mode().IsRegular() {
+			problems = append(problems, fmt.Sprintf("task %s: its prompt, %s, is not a file", name, t.Prompt))
+			continue
+		}
+		fmt.Fprintf(out, "task      %-12s %s, at most %d open with %s\n", name, t.Prompt, *t.MaxOpen, t.Label)
 	}
 	if len(problems) > 0 {
 		return fail("%s", strings.Join(problems, "\n"))
