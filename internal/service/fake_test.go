@@ -30,6 +30,7 @@ type fakeGitHub struct {
 	checks   map[string][]map[string]any // by sha
 	uploads  []string                    // "<auth> <name> <content type>"
 	events   map[int][]map[string]any    // issue events, such as labels
+	merges   []string                    // "<number> <sha> <title>"
 }
 
 type fakeIssue struct {
@@ -150,6 +151,7 @@ var (
 	reComments = regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/(\d+)/comments$`)
 	reEvents   = regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/(\d+)/events$`)
 	rePR       = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)$`)
+	reMerge    = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)/merge$`)
 	reReviews  = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)/reviews$`)
 	reRC       = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)/comments$`)
 	reChecks   = regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/([0-9a-f]+)/check-runs$`)
@@ -248,6 +250,20 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reply(f.prJSON(pr))
+	case r.Method == "PUT" && reMerge.MatchString(p):
+		// A squash merge, as far as the default branch goes: main becomes
+		// the head, which the tests keep up to date with main.
+		pr := f.prs[num(reMerge)]
+		head := f.sha(pr.Head)
+		if pr.State != "open" || in["sha"] != head || in["merge_method"] != "squash" {
+			w.WriteHeader(409)
+			reply(map[string]any{"message": "Head branch was modified"})
+			return
+		}
+		exec.Command("git", "-C", f.origin, "update-ref", "refs/heads/"+pr.Base, head).Run()
+		pr.State, pr.Merged = "closed", true
+		f.merges = append(f.merges, fmt.Sprintf("%d %s %s", pr.Number, head, in["commit_title"]))
+		reply(map[string]any{"merged": true})
 	case r.Method == "GET" && reReviews.MatchString(p):
 		out := f.reviews[num(reReviews)]
 		if out == nil {
@@ -290,6 +306,30 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		f.t.Errorf("fake GitHub: unexpected %s %s", r.Method, r.URL)
 		http.NotFound(w, r)
 	}
+}
+
+// review has a user review a pull request's head.
+func (f *fakeGitHub) review(pr int, user, state, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := f.id()
+	f.reviews[pr] = append(f.reviews[pr], map[string]any{"id": id, "user": map[string]string{"login": user},
+		"state": state, "body": body, "commit_id": f.sha(f.prs[pr].Head),
+		"submitted_at": time.Now().UTC().Format(time.RFC3339Nano),
+		"html_url": fmt.Sprintf("https://github.test/%s/pull/%d#pullrequestreview-%d", f.repo, pr, id)})
+}
+
+// pass has every check pass on a branch's head.
+func (f *fakeGitHub) pass(branch string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checks[f.sha(branch)] = []map[string]any{{"id": f.id(), "name": "unit", "status": "completed", "conclusion": "success", "html_url": "https://ci"}}
+}
+
+func (f *fakeGitHub) merged() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.merges...)
 }
 
 func (f *fakeGitHub) uploaded() []string {

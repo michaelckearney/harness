@@ -112,7 +112,17 @@ When the default branch moves on only in other projects, without conflicts,
 a project's thread is not asked: the harness merges it into the branch
 itself, and CI checks the result. The bot replies in the issue, keeps its pull request's title and
 description in `.harness/pr.md` in its worktree, and ends every turn with
-`harness done`. You merge.
+`harness done`.
+
+You approve; the harness merges. A bot's pull request is squash-merged,
+titled as GitHub titles it, once a trigger user approved it and none asked
+for changes since, and it is ready for review, CI passed on its head, it
+contains the default branch, and the bot has no turn running or to take.
+One merges a poll, so the others are brought up to date with it first. An
+approval stands for what the bot pushes after it, such as merging the
+default branch, except in a change to `harness.yaml` or `.github/`, whose
+head itself must be approved. An approval that says nothing is not a turn.
+Pull requests a person opens are theirs to merge.
 
 During a turn the bot's shell runs only the harness:
 
@@ -185,7 +195,7 @@ pull request's CI tests everything.
   sandbox, steered by its instructions. On a server with `bot_user`, the agents run
   as that user: no sudo, no gh login, no say over the service.
 - **harness.yaml is read from the default branch only**, so a change to the
-  bots takes effect when a person merges it.
+  bots takes effect when a person approves its head, and it merges.
 - **Pull requests get no secrets.** The bots push branches to the same
   repository, so anything a pull request's workflow could read, a bot's
   change could read. The secrets are only on the servers.
