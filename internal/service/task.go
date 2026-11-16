@@ -151,7 +151,8 @@ func (s *Service) runTask(p *proj, name string, task *repo.Task, head string, op
 }
 
 // before runs a task's before on the checkout, with the host's environment,
-// as prepare does a thread's, and returns the end of what it printed.
+// as prepare does a thread's, and this harness first on its PATH, as the bots
+// have it. It returns the end of what it printed.
 func (s *Service) before(p *proj, name, command string) (string, error) {
 	logDir := filepath.Join(s.cfg.StateDir, "logs")
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
@@ -169,6 +170,7 @@ func (s *Service) before(p *proj, name, command string) (string, error) {
 	var out tail
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = s.talkDir(p)
+	cmd.Env = append(os.Environ(), "PATH="+harnessPath())
 	w := io.MultiWriter(logFile, &out)
 	cmd.Stdout, cmd.Stderr = w, w
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
