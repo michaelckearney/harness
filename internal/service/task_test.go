@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func TestTasks(t *testing.T) {
 			fmt.Sprintf("tasks: { design: { prompt: tasks/design.md, before: %q, label: design, max_open: 1 } }\n", before))
 	}
 	write(t, filepath.Join(h.work, "tasks/design.md"), "Propose one small change to the UI.\n")
-	task(`mkdir -p shots && echo png > shots/header.png && echo ran >> "$FAKE_DIR/before"`)
+	task(`mkdir -p shots && echo png > shots/header.png && echo ran >> "$FAKE_DIR/before" && echo "$PATH" > "$FAKE_DIR/path"`)
 	h.push("Add the design task")
 	runs := func() int { return strings.Count(h.read("prompts"), "This is a run of the monorepo's design task") }
 
@@ -36,6 +37,10 @@ func TestTasks(t *testing.T) {
 	h.step()
 	if runs() != 1 || h.read("before") != "ran\n" {
 		t.Fatalf("runs %d, before %q", runs(), h.read("before"))
+	}
+	// before finds this harness as harness, as the bots do.
+	if exe, _ := os.Executable(); !strings.HasPrefix(h.read("path"), filepath.Dir(exe)+string(os.PathListSeparator)) {
+		t.Errorf("before's PATH does not start with the harness's folder: %q", h.read("path"))
 	}
 	prompts := h.read("prompts")
 	for _, want := range []string{"Propose one small change to the UI.", "fewer than 1 open issues carry its label, design: 0 do", "ran in your folder and passed"} {

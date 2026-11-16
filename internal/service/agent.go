@@ -57,11 +57,7 @@ func (s *Service) startAgents(logger *log.Logger) error {
 		env = append(env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*")
 	}
 	policy := agents.Policy{Command: s.Command, ReadDirs: []string{filepath.Join(c.StateDir, "attachments")}}
-	// The bots run this harness: its folder leads their PATH.
-	path := os.Getenv("PATH")
-	if exe, err := os.Executable(); err == nil {
-		path = filepath.Dir(exe) + string(os.PathListSeparator) + path
-	}
+	path := harnessPath()
 	s.agents = map[string]agents.Agent{}
 	for _, name := range c.Agents {
 		logFile, err := os.OpenFile(filepath.Join(logDir, "agent-"+name+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -189,4 +185,14 @@ func (s *Service) say(p *proj, n int, out io.Writer, kind, text string) {
 		fmt.Fprintf(out, "[%s] %s\n", kind, text)
 	}
 	s.live.publish(Line{Repo: p.cfg.Repo, Number: n, Time: time.Now(), Kind: kind, Text: text})
+}
+
+// harnessPath is the PATH the bots and a task's before run with: this
+// harness's folder leads it, so `harness` is this harness.
+func harnessPath() string {
+	path := os.Getenv("PATH")
+	if exe, err := os.Executable(); err == nil {
+		path = filepath.Dir(exe) + string(os.PathListSeparator) + path
+	}
+	return path
 }
