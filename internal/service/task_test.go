@@ -130,3 +130,20 @@ func TestTasks(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdating(t *testing.T) {
+	for _, c := range []struct {
+		pin, have string
+		want      bool
+	}{
+		{"v0.7.9", "v0.7.8", true},
+		{"v0.7.8", "v0.7.9", true},
+		{"v0.7.9", "v0.7.9", false},
+		{"", "v0.7.9", false},
+		{"v0.7.9", "dev", false},
+	} {
+		if got := updating(c.pin, c.have); got != c.want {
+			t.Errorf("updating(%q, %q) = %v, want %v", c.pin, c.have, got, c.want)
+		}
+	}
+}
