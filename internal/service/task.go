@@ -15,6 +15,7 @@ import (
 
 	"github.com/michaelckearney/harness/internal/discord"
 	"github.com/michaelckearney/harness/internal/repo"
+	"github.com/michaelckearney/harness/internal/version"
 )
 
 //go:embed task.md
@@ -36,9 +37,9 @@ func taskKey(repoName, task string) string { return "task:" + repoName + ":" + t
 // Discord turns share, since it works on their checkout.
 func (s *Service) tasks(p *proj) {
 	s.mu.Lock()
-	cfg, base := p.repo, p.base
+	cfg, base, pin := p.repo, p.base, p.pin
 	s.mu.Unlock()
-	if cfg == nil || len(cfg.Tasks) == 0 {
+	if cfg == nil || len(cfg.Tasks) == 0 || updating(pin, version.Get()) {
 		return
 	}
 	g, err := s.git(p, "")
@@ -102,6 +103,13 @@ func (s *Service) tasks(p *proj) {
 			s.mu.Unlock()
 		}
 	}
+}
+
+// updating reports whether harness.yaml pins another harness than this one,
+// have: this one is about to put it in its place, and a task runs on the
+// harness the default branch pins, not the one it is leaving.
+func updating(pin, have string) bool {
+	return pin != "" && have != "dev" && pin != have
 }
 
 // runTask is one run of a task: the checkout at head, its before, then the
