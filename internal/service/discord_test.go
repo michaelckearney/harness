@@ -6,12 +6,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/michaelckearney/harness/internal/discord"
+	"github.com/michaelckearney/harness/internal/store"
 )
 
 // fakeChat is a Discord server, as the service uses it.
@@ -263,5 +265,120 @@ func TestDigestHelpers(t *testing.T) {
 	}
 	if !olderID("", "5") || !olderID("9", "10") || olderID("10", "9") {
 		t.Error("olderID")
+	}
+}
+
+func TestIssueAndPullRequestCloseTogether(t *testing.T) {
+	h := setup(t)
+	h.step()
+
+	// The owner closes the issue: its pull request closes, and its branch
+	// goes.
+	n := h.gh.openScoped("owner", "Say hello", "Add hello.txt, please.")
+	h.step()
+	pr := h.gh.pr("harness/" + fmt.Sprint(n))
+	if pr == nil {
+		t.Fatalf("no pull request:\n%s", h.read("out"))
+	}
+	h.gh.close(n)
+	h.step()
+	if pr.State != "closed" || h.gh.branchExists("harness/"+fmt.Sprint(n)) || h.thread(n).State != store.Closed {
+		t.Errorf("after the issue closed: pull request %s, branch there %v, thread %s", pr.State, h.gh.branchExists("harness/"+fmt.Sprint(n)), h.thread(n).State)
+	}
+	if c := h.gh.commentsOn(pr.Number); len(c) != 1 || !strings.Contains(c[0], fmt.Sprintf("its issue #%d was closed", n)) {
+		t.Errorf("on the pull request: %q", c)
+	}
+
+	// The owner closes the pull request: its issue closes, as not planned.
+	write(t, filepath.Join(h.fake, "scenario"), "work")
+	m := h.gh.openScoped("owner", "Say hello again", "Add hello.txt, please.")
+	h.step()
+	pr = h.gh.pr("harness/" + fmt.Sprint(m))
+	h.gh.mu.Lock()
+	pr.State = "closed"
+	h.gh.mu.Unlock()
+	h.step()
+	h.gh.mu.Lock()
+	state, states := h.gh.issues[m].State, h.gh.states
+	h.gh.mu.Unlock()
+	if state != "closed" || !slices.Contains(states, fmt.Sprintf("%d closed not_planned app", m)) || h.gh.branchExists("harness/"+fmt.Sprint(m)) {
+		t.Errorf("after the pull request closed: issue %s, changes %q", state, states)
+	}
+	if c := h.gh.commentsOn(m); len(c) == 0 || !strings.Contains(c[len(c)-1], fmt.Sprintf("its pull request #%d was closed", pr.Number)) {
+		t.Errorf("on the issue: %q", c)
+	}
+}
+
+func TestTalkingInAPullRequestsThread(t *testing.T) {
+	h := setup(t)
+	chat := newFakeChat()
+	h.s.chat = chat
+	h.s.cfg.Discord.Owner, h.s.cfg.Discord.DigestHour = "42", 99
+	h.step()
+	n := h.gh.openScoped("owner", "Say hello", "Add hello.txt, please.")
+	h.step()
+	h.step()
+	pr := h.gh.pr("harness/" + fmt.Sprint(n))
+	if pr == nil || chat.in["t1"] == nil {
+		t.Fatalf("no pull request, or no thread for it: %q", chat.log)
+	}
+	write(t, filepath.Join(h.fake, "pr"), fmt.Sprint(pr.Number))
+	write(t, filepath.Join(h.fake, "issue"), fmt.Sprint(n))
+
+	// The owner, in the pull request's thread: the bot knows which pull
+	// request and issue it is, changes the issue, not the pull request,
+	// and closes the issue with the owner's reason.
+	write(t, filepath.Join(h.fake, "scenario"), "revise")
+	now := time.Now()
+	msg := discord.Msg{ID: "2000", Channel: "t1", Author: "me", AuthorID: "42", Content: "@Sparky make the dialog larger instead", Time: now}
+	chat.history["t1"] = []discord.Msg{msg}
+	h.s.converse(discord.Mention{Msg: msg, Thread: true, Where: "#" + fmt.Sprint(pr.Number)})
+	if p := h.read("prompts"); !strings.Contains(p, fmt.Sprintf("under pull request #%d's message in #pull-requests, the pull request a bot opened for issue #%d", pr.Number, n)) {
+		t.Errorf("the prompt does not name the pull request and issue:\n%s", p)
+	}
+	out := h.read("out")
+	for _, want := range []string{
+		fmt.Sprintf("#%d is a pull request, and you change issues only: a bot's pull request follows its issue, #%d", pr.Number, n),
+		"say why on standard input",
+		fmt.Sprintf("Closed #%d.", n),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the bot was not told %q:\n%s", want, out)
+		}
+	}
+	if c := h.gh.commentsOn(pr.Number); len(c) != 0 {
+		t.Errorf("commented on the pull request: %q", c)
+	}
+	h.gh.mu.Lock()
+	state, states := h.gh.issues[n].State, h.gh.states
+	h.gh.mu.Unlock()
+	if state != "closed" || !slices.Contains(states, fmt.Sprintf("%d closed not_planned owner", n)) {
+		t.Errorf("the issue is %s; changes %q", state, states)
+	}
+	if c := h.gh.commentsOn(n); len(c) == 0 || !strings.Contains(c[len(c)-1], "Make the dialog larger instead.") {
+		t.Errorf("the reason on the issue: %q", c)
+	}
+	// The issue closed takes its pull request with it.
+	write(t, filepath.Join(h.fake, "scenario"), "quiet")
+	h.step()
+	if pr.State != "closed" {
+		t.Errorf("the pull request is %s", pr.State)
+	}
+
+	// Reopened, with what to do now: its bot starts again from that.
+	write(t, filepath.Join(h.fake, "scenario"), "reopen")
+	msg = discord.Msg{ID: "2001", Channel: "t1", Author: "me", AuthorID: "42", Content: "@Sparky actually, reopen it", Time: now}
+	chat.history["t1"] = append(chat.history["t1"], msg)
+	h.s.converse(discord.Mention{Msg: msg, Thread: true, Where: "#" + fmt.Sprint(pr.Number)})
+	if out := h.read("out"); !strings.Contains(out, fmt.Sprintf("Reopened #%d.", n)) {
+		t.Fatalf("reopen:\n%s", out)
+	}
+	write(t, filepath.Join(h.fake, "scenario"), "quiet")
+	h.step()
+	if th := h.thread(n); th.State == store.Closed {
+		t.Errorf("the thread did not start again: %+v", th)
+	}
+	if p := h.read("prompts"); !strings.Contains(p, "Try one column after all.") {
+		t.Errorf("the bot was not given the comment:\n%s", p)
 	}
 }

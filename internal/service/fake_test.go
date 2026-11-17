@@ -31,6 +31,7 @@ type fakeGitHub struct {
 	uploads  []string                    // "<auth> <name> <content type>"
 	events   map[int][]map[string]any    // issue events, such as labels
 	merges   []string                    // "<number> <sha> <title>"
+	states   []string                    // "<number> <state> <reason> <app or owner>", each change
 }
 
 type fakeIssue struct {
@@ -153,6 +154,11 @@ func (f *fakeGitHub) issueJSON(i *fakeIssue) map[string]any {
 }
 
 // close closes an issue.
+// branchExists reports whether origin has the branch.
+func (f *fakeGitHub) branchExists(name string) bool {
+	return exec.Command("git", "-C", f.origin, "rev-parse", "--verify", "--quiet", "refs/heads/"+name).Run() == nil
+}
+
 func (f *fakeGitHub) close(n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -246,11 +252,36 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		reply(out)
 	case r.Method == "GET" && reIssue.MatchString(p):
 		i := f.issues[num(reIssue)]
+		if pr := f.prs[num(reIssue)]; i == nil && pr != nil {
+			// A pull request is an issue too, to GitHub's issues API.
+			reply(map[string]any{"number": pr.Number, "title": pr.Title, "body": pr.Body, "state": pr.State,
+				"user": map[string]string{"login": "harness-bot[bot]"}, "pull_request": map[string]any{}, "labels": []any{}})
+			return
+		}
 		if i == nil {
 			http.NotFound(w, r)
 			return
 		}
 		reply(f.issueJSON(i))
+	case r.Method == "PATCH" && reIssue.MatchString(p):
+		n, state, reason := num(reIssue), in["state"].(string), ""
+		if why, ok := in["state_reason"].(string); ok {
+			reason = why
+		}
+		who := "app"
+		if r.Header.Get("Authorization") == "token owner-token" {
+			who = "owner"
+		}
+		f.states = append(f.states, fmt.Sprintf("%d %s %s %s", n, state, reason, who))
+		if i := f.issues[n]; i != nil {
+			i.State = state
+		} else if pr := f.prs[n]; pr != nil {
+			pr.State = state
+		} else {
+			http.NotFound(w, r)
+			return
+		}
+		reply(map[string]any{})
 	case r.Method == "GET" && reEvents.MatchString(p):
 		out := f.events[num(reEvents)]
 		if out == nil {

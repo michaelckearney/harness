@@ -127,6 +127,11 @@ default branch, except in a change to `harness.yaml` or `.github/`, whose
 head itself must be approved. An approval that says nothing is not a turn.
 Pull requests a person opens are theirs to merge.
 
+An issue and its bot's pull request close together: close either, and the
+harness closes the other, with a comment saying why, and deletes the
+branch. Reopen the issue with a comment saying what to do now, and a bot
+starts on it again.
+
 During a turn the bot's shell runs only the harness:
 
 ```
@@ -337,12 +342,16 @@ attach files, and start threads in them.
   the one it was mentioned in, or one it starts under the message. It
   reads the conversation, a checkout of the default branch, the issues and
   pull requests, and earlier discussions in the server, which it can
-  search. When the owner tells it to, it opens issues, comments, and
-  labels on GitHub as the owner, so the bots take them as the owner's word
-  (an issue can show images and videos from the checkout, uploaded as the
-  owner's are);
-  in a conversation someone else started, it can only say what it would
-  do. One Discord turn runs at a time, with the monorepo's default agent.
+  search. When the owner tells it to, it opens, comments on, labels,
+  closes, and reopens issues on GitHub as the owner, so the bots take them
+  as the owner's word (an issue can show images and videos from the
+  checkout, uploaded as the owner's are). It changes issues, never pull
+  requests: the issue is the spec, and its bot's pull request follows it.
+  Mentioned in a pull request's thread in #pull-requests, it knows which
+  pull request and issue the thread is about, so the owner can ask about a
+  proposal, ask for a change to it, or have it replaced by another. In a
+  conversation someone else started, it can only say what it would do. One
+  Discord turn runs at a time, with the monorepo's default agent.
 
 Without Discord, or when it cannot be reached, the bots work as before.
 
