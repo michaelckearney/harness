@@ -558,6 +558,21 @@ func (c *Client) CommentAs(repo string, n int, body, token string) error {
 	return c.do("POST", fmt.Sprintf("/repos/%s/issues/%d/comments", repo, n), "token "+token, map[string]string{"body": body}, nil)
 }
 
+// SetState opens or closes an issue or pull request: as whoever token is,
+// or, with no token, as the App. reason is a closed issue's state_reason,
+// such as "not_planned", or "".
+func (c *Client) SetState(repo string, n int, state, reason, token string) error {
+	in := map[string]string{"state": state}
+	if reason != "" {
+		in["state_reason"] = reason
+	}
+	path := fmt.Sprintf("/repos/%s/issues/%d", repo, n)
+	if token == "" {
+		return c.call(repo, "PATCH", path, in, nil)
+	}
+	return c.do("PATCH", path, "token "+token, in, nil)
+}
+
 // Label puts labels on an issue as whoever token is.
 func (c *Client) Label(repo string, n int, labels []string, token string) error {
 	return c.do("POST", fmt.Sprintf("/repos/%s/issues/%d/labels", repo, n), "token "+token, map[string]any{"labels": labels}, nil)

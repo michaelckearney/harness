@@ -447,11 +447,32 @@ func (s *Service) refresh(p *proj, t *store.Thread, start time.Time, isNew bool)
 	if err != nil {
 		return err
 	}
+	// An issue and its pull request close together: whichever is closed,
+	// the harness closes the other, and the branch goes.
 	if issue.State != "open" {
-		if !isNew {
-			return s.close(p, t.Number, "the issue was closed")
+		if isNew {
+			return nil
 		}
-		return nil
+		if t.PR != 0 {
+			pr, err := s.gh.PR(t.Repo, t.PR)
+			if err != nil {
+				return err
+			}
+			if pr.State == "open" {
+				if err := s.gh.Comment(t.Repo, pr.Number, fmt.Sprintf("Closed, as its issue #%d was closed.", t.Number)); err != nil {
+					return err
+				}
+				if err := s.gh.SetState(t.Repo, pr.Number, "closed", "", ""); err != nil {
+					return err
+				}
+			}
+			if pr.MergedAt == nil {
+				if err := s.gh.DeleteBranch(t.Repo, branch(t.Number)); err != nil {
+					return err
+				}
+			}
+		}
+		return s.close(p, t.Number, "the issue was closed")
 	}
 	// The thread's own pull request closing closes the thread. A closed one
 	// found by its branch is from before the issue was reopened.
@@ -461,11 +482,19 @@ func (s *Service) refresh(p *proj, t *store.Thread, start time.Time, isNew bool)
 			return err
 		}
 		if pr.State != "open" {
-			why := "its pull request was closed"
 			if pr.MergedAt != nil {
-				why = "its pull request was merged"
+				return s.close(p, t.Number, "its pull request was merged")
 			}
-			return s.close(p, t.Number, why)
+			if err := s.gh.Comment(t.Repo, t.Number, fmt.Sprintf("Closed, as its pull request #%d was closed. Reopen it, saying what to do differently, to have a bot start again.", pr.Number)); err != nil {
+				return err
+			}
+			if err := s.gh.SetState(t.Repo, t.Number, "closed", "not_planned", ""); err != nil {
+				return err
+			}
+			if err := s.gh.DeleteBranch(t.Repo, branch(t.Number)); err != nil {
+				return err
+			}
+			return s.close(p, t.Number, "its pull request was closed")
 		}
 		// Between turns, the pull request is what the bot last published.
 		// During one, the bot may be publishing.

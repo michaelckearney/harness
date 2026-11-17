@@ -64,7 +64,7 @@ func IsBotCommand(cmd string) bool {
 	case "status", "diff", "commit", "sync", "reply", "done", "rm":
 		return true
 	// In the monorepo's Discord server.
-	case "issues", "issue", "search-discord", "read-discord", "open-issue", "comment", "label", "digest":
+	case "issues", "issue", "search-discord", "read-discord", "open-issue", "comment", "label", "close", "reopen", "digest":
 		return true
 	}
 	return false
@@ -115,7 +115,7 @@ func Bot(cmd string, rest []string) int {
 			return fail("%s needs arguments; run harness help", cmd)
 		}
 		return bot(cmd, rest, "", "")
-	case "open-issue", "comment", "digest":
+	case "open-issue", "comment", "close", "reopen", "digest":
 		if len(rest) == 0 || rest[len(rest)-1] != "-" {
 			return fail("%s takes Markdown on standard input: harness %s - <<'EOF' ... EOF", cmd, cmd)
 		}

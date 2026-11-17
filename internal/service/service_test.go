@@ -122,6 +122,17 @@ quiet)
 	;;
 silent)
 	;;
+revise)
+	echo "Let the hex wrap." | "$BS" comment "$(cat "$FAKE_DIR/pr")" - >> "$out" 2>&1
+	echo "Let the hex wrap." | "$BS" label "$(cat "$FAKE_DIR/pr")" framework >> "$out" 2>&1
+	"$BS" close "$(cat "$FAKE_DIR/issue")" - < /dev/null >> "$out" 2>&1
+	echo '"Make the dialog larger instead."' | "$BS" close "$(cat "$FAKE_DIR/issue")" - >> "$out" 2>&1
+	echo "Closed it." | "$BS" reply - >> "$out" 2>&1
+	;;
+reopen)
+	echo '"Try one column after all."' | "$BS" reopen "$(cat "$FAKE_DIR/issue")" - >> "$out" 2>&1
+	echo "Reopened it." | "$BS" reply - >> "$out" 2>&1
+	;;
 discuss)
 	"$BS" issues > "$FAKE_DIR/issues" 2>&1
 	"$BS" search-discord dark mode > "$FAKE_DIR/search" 2>&1

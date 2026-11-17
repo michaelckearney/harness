@@ -246,6 +246,13 @@ func (s *Service) converse(m discord.Mention) {
 	} else {
 		prompt.WriteString("They are not the owner: you cannot open issues, comment, or label on GitHub this turn; say what you would do, for the owner to confirm.\n")
 	}
+	if pr := s.prOfThread(thread); pr != 0 {
+		fmt.Fprintf(&prompt, "This thread is under pull request #%d's message in #pull-requests", pr)
+		if n := s.issueOf(p, pr); n != 0 {
+			fmt.Fprintf(&prompt, ", the pull request a bot opened for issue #%d", n)
+		}
+		prompt.WriteString(": what is said here is about them. Read them with issue <n>.\n")
+	}
 	if c.Session == "" {
 		prompt.WriteString("\nThe conversation so far, oldest first:\n\n")
 	} else {
@@ -311,7 +318,7 @@ func olderID(a, b string) bool {
 
 // talkCommands are the commands of a Discord turn, for the bot's help.
 const talkCommands = "In Discord, the commands are: reply -, issues, issue <n>, search-discord <words>, read-discord <link>, " +
-	"open-issue [-label <label>]... -, comment <n> -, label <n> <label>..., digest -, and done."
+	"open-issue [-label <label>]... -, comment <n> -, label <n> <label>..., close <n> -, reopen <n> -, digest -, and done."
 
 // handleTalk answers a command run in the Discord checkout, during a
 // Discord turn.
@@ -340,6 +347,22 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 			return 0, fixable(fmt.Sprintf("%q is not a number", req.Args[0]))
 		}
 		return n, nil
+	}
+	// anIssue is issue n, which is not a pull request: the Discord bot
+	// changes issues only, and a bot's pull request follows its issue.
+	anIssue := func(n int) (*github.Issue, error) {
+		issue, err := s.gh.Issue(p.cfg.Repo, n)
+		if err != nil {
+			return nil, fixable(fmt.Sprintf("#%d: %v", n, err))
+		}
+		if issue.PullRequest != nil {
+			msg := fmt.Sprintf("#%d is a pull request, and you change issues only: a bot's pull request follows its issue", n)
+			if i := s.issueOf(p, n); i != 0 {
+				msg += fmt.Sprintf(", #%d", i)
+			}
+			return nil, fixable(msg)
+		}
+		return issue, nil
 	}
 	footer := ""
 	switch {
@@ -515,6 +538,9 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if _, err := anIssue(n); err != nil {
+			return "", err
+		}
 		if strings.TrimSpace(req.Body) == "" {
 			return "", fixable("write the comment on standard input: harness comment 12 - <<'EOF' ... EOF")
 		}
@@ -538,6 +564,9 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 		if len(req.Args) < 2 {
 			return "", fixable("give the labels: harness label 12 project:harbor")
 		}
+		if _, err := anIssue(n); err != nil {
+			return "", err
+		}
 		tok, err := github.OwnerToken(s.cfg.Gh)
 		if err != nil {
 			return "", err
@@ -546,6 +575,54 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("Labelled #%d %s.", n, strings.Join(req.Args[1:], ", ")), nil
+	case "close", "reopen":
+		if err := needOwner(); err != nil {
+			return "", err
+		}
+		n, err := number()
+		if err != nil {
+			return "", err
+		}
+		issue, err := anIssue(n)
+		if err != nil {
+			return "", err
+		}
+		closing := req.Cmd == "close"
+		if closing != (issue.State == "open") {
+			return "", fixable(fmt.Sprintf("#%d is %s already", n, issue.State))
+		}
+		why := strings.TrimSpace(req.Body)
+		if why == "" {
+			if closing {
+				return "", fixable("say why on standard input, in the owner's words: harness close 12 - <<'EOF' ... EOF")
+			}
+			return "", fixable("say what to do now on standard input, in the owner's words: harness reopen 12 - <<'EOF' ... EOF")
+		}
+		tok, err := github.OwnerToken(s.cfg.Gh)
+		if err != nil {
+			return "", err
+		}
+		if closing {
+			// The reason first, so it is on the issue when it closes.
+			if err := s.gh.CommentAs(p.cfg.Repo, n, why+footer, tok); err != nil {
+				return "", err
+			}
+			if err := s.gh.SetState(p.cfg.Repo, n, "closed", "not_planned", tok); err != nil {
+				return "", err
+			}
+			s.log.Printf("discord: closed #%d for the owner", n)
+			return fmt.Sprintf("Closed #%d. Its pull request, if it has one, closes with it.", n), nil
+		}
+		// Reopened, then the comment, which is new to the issue's bot: it
+		// starts again on what it says.
+		if err := s.gh.SetState(p.cfg.Repo, n, "open", "", tok); err != nil {
+			return "", err
+		}
+		if err := s.gh.CommentAs(p.cfg.Repo, n, why+footer, tok); err != nil {
+			return "", err
+		}
+		s.log.Printf("discord: reopened #%d for the owner", n)
+		return fmt.Sprintf("Reopened #%d. A bot starts on it again, from your comment.", n), nil
 	}
 	return "", fixable(fmt.Sprintf("%q is not a command in Discord. %s", req.Cmd, talkCommands))
 }
@@ -614,6 +691,35 @@ func (s *Service) describeIssue(p *proj, n int) (string, error) {
 		fmt.Fprintf(&b, "\n--- %s, %s:\n%s\n", c.User.Login, c.CreatedAt.Format("2006-01-02 15:04"), strings.TrimSpace(c.Body))
 	}
 	return b.String(), nil
+}
+
+// prOfThread is the pull request whose message in #pull-requests thread is
+// under, or 0.
+func (s *Service) prOfThread(thread string) int {
+	posts, err := s.posts()
+	if err != nil {
+		return 0
+	}
+	for n, po := range posts {
+		if po.Thread == thread {
+			return n
+		}
+	}
+	return 0
+}
+
+// issueOf is the issue whose bot's pull request is pr, or 0.
+func (s *Service) issueOf(p *proj, pr int) int {
+	threads, err := s.st.Threads()
+	if err != nil {
+		return 0
+	}
+	for _, t := range threads {
+		if t.Repo == p.cfg.Repo && t.PR == pr {
+			return t.Number
+		}
+	}
+	return 0
 }
 
 // inTalkDir reports whether a command ran in the Discord checkout.
