@@ -91,9 +91,7 @@ func ciTest(ctx context.Context, stdout, stderr io.Writer) error {
 	testErr := Verb(ctx, "test", []string{"-p", "framework"}, stdout, stderr)
 	// What the tests downloaded and built is worth keeping even when one
 	// failed: the next run needs it all the same.
-	if err := ciSave(ctx, ref, dir, stderr); err != nil {
-		return err
-	}
+	ciSave(ctx, ref, dir, stderr)
 	return testErr
 }
 
@@ -116,9 +114,7 @@ func ciRelease(ctx context.Context, stdout, stderr io.Writer) error {
 		return &Error{err.Error()}
 	}
 	relErr := Release(ctx, nil, stdout, stderr)
-	if err := ciSave(ctx, ref, dir, stderr); err != nil {
-		return err
-	}
+	ciSave(ctx, ref, dir, stderr)
 	return relErr
 }
 
@@ -174,18 +170,19 @@ func allowUserNamespaces(ctx context.Context, stderr io.Writer) {
 }
 
 // ciSave publishes the cache, unless the run was stopped, and says how much
-// room the runner has left.
-func ciSave(ctx context.Context, ref, dir string, stderr io.Writer) error {
+// room the runner has left. A cache it cannot publish is only a warning: the
+// run's result is the tests' or the release's, and the next run starts from
+// the cache before.
+func ciSave(ctx context.Context, ref, dir string, stderr io.Writer) {
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return nil
+		return
 	}
 	if err := cache.Save(ctx, ref, dir, stderr); err != nil {
-		return &Error{err.Error()}
+		fmt.Fprintf(stderr, "::warning::harness: %v; the next run starts from the cache before\n", err)
 	}
 	if df, err := exec.CommandContext(ctx, "df", "-h", "/").Output(); err == nil {
 		fmt.Fprintf(stderr, "harness: the runner's disk after the run:\n%s", df)
 	}
-	return nil
 }
 
 func ciRoot() (string, error) {
