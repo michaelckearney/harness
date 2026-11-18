@@ -385,7 +385,11 @@ They are kept in the registry beside the image, as `ci-cache-test` and
 `ci-cache-release`: main writes them, and pull requests read the test
 cache and never write it, so a new branch starts warm and no branch
 changes what another starts from. On GHCR, a save deletes the version it
-replaced, which the tag left untagged, so the caches do not pile up. With `GH_TOKEN` set, the pipelines log in
+replaced, which the tag left untagged, so the caches do not pile up. The
+caches never fail a run: the registry calls are tried again a few times
+when they fail the way registries do for a moment (a connection reset, a
+token refused, a 5xx), and a cache still not restored or saved after that
+is a warning, and a cold start. With `GH_TOKEN` set, the pipelines log in
 to the registry with it: pull requests need `packages: read`, main
 `packages: write`.
 

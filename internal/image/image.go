@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/michaelckearney/harness/internal/repo"
+	"github.com/michaelckearney/harness/internal/retry"
 )
 
 // Dir is the image's folder, relative to the root.
@@ -69,7 +70,10 @@ func Ensure(ctx context.Context, root, repoName, tag string, push bool, log io.W
 		return fmt.Errorf("docker build %s: %v", Dir, err)
 	}
 	if push {
-		if _, err := run(ctx, root, log, "docker", "push", "--quiet", tag); err != nil {
+		if err := retry.Do(ctx, log, "docker push "+tag, func() error {
+			_, err := run(ctx, root, log, "docker", "push", "--quiet", tag)
+			return err
+		}); err != nil {
 			fmt.Fprintf(log, "::warning::harness: could not publish %s (%v), so pull requests build it until it is; on GitHub, check that the package %s lets this repository's Actions write to it\n",
 				tag, err, strings.ToLower(repoName))
 		}
@@ -129,7 +133,10 @@ func volumes(ctx context.Context, img string) ([]string, error) {
 	}
 	out, err := inspect()
 	if err != nil {
-		if _, perr := run(ctx, "", os.Stderr, "docker", "pull", "--quiet", img); perr != nil {
+		if perr := retry.Do(ctx, os.Stderr, "docker pull "+img, func() error {
+			_, err := run(ctx, "", os.Stderr, "docker", "pull", "--quiet", img)
+			return err
+		}); perr != nil {
 			return nil, fmt.Errorf("%s is not here, and pulling it failed; run harness image first: %v", img, perr)
 		}
 		if out, err = inspect(); err != nil {
@@ -154,10 +161,16 @@ func run(ctx context.Context, dir string, log io.Writer, name string, args ...st
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if log != nil {
-		cmd.Stdout, cmd.Stderr = log, log
+		// What failed is still in the error, so a retry can tell why.
+		cmd.Stdout, cmd.Stderr = log, io.MultiWriter(log, &errb)
 	}
 	if err := cmd.Run(); err != nil {
-		if s := strings.TrimSpace(errb.String()); s != "" {
+		s := strings.TrimSpace(errb.String())
+		if log != nil {
+			// The log has it all; the error needs only how it ended.
+			s = s[strings.LastIndex(s, "\n")+1:]
+		}
+		if s != "" {
 			return "", fmt.Errorf("%v: %s", err, s)
 		}
 		return "", err

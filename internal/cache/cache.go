@@ -23,12 +23,14 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/compression"
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/klauspost/compress/zstd"
+	"github.com/michaelckearney/harness/internal/retry"
 )
 
 // Ref is the cache called kind for the image img, such as
@@ -38,12 +40,17 @@ func Ref(img, kind string) string {
 	return repo + ":ci-cache-" + kind
 }
 
-// Restore unpacks the cache at ref into dir. A cache that is not there yet is
-// not an error: the pipeline starts cold, and says so.
+// Restore unpacks the cache at ref into dir. It never fails the run: with
+// no cache there yet, or one it cannot read, the pipeline starts cold, and
+// says so. An unpacking cut off part way is tried again from the start, into
+// an empty dir.
 func Restore(ctx context.Context, ref, dir string, log io.Writer) error {
 	r, err := name.ParseReference(ref)
 	if err != nil {
 		return err
+	}
+	if dir == "" {
+		return errors.New("the cache has no folder to restore into")
 	}
 	img, err := remote.Image(r, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if err != nil {
@@ -52,24 +59,72 @@ func Restore(ctx context.Context, ref, dir string, log io.Writer) error {
 			fmt.Fprintf(log, "harness: no cache at %s yet; starting cold\n", ref)
 			return nil
 		}
-		return fmt.Errorf("reading the cache %s: %w", ref, err)
+		return cold(ctx, ref, dir, log, fmt.Errorf("reading the cache %s: %w", ref, err))
 	}
+	// img is the manifest read once, so every attempt reads the same layer.
+	err = retry.Do(ctx, log, "restoring the cache "+ref, func() error {
+		if err := clearDir(dir); err != nil {
+			return err
+		}
+		return unpack(img, dir)
+	})
+	if err != nil {
+		return cold(ctx, ref, dir, log, fmt.Errorf("unpacking the cache %s: %w", ref, err))
+	}
+	fmt.Fprintf(log, "harness: restored the cache %s\n", ref)
+	return nil
+}
+
+// cold empties dir of what a failed restore left, and warns that the run
+// starts without its cache.
+func cold(ctx context.Context, ref, dir string, log io.Writer, err error) error {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return err
+	}
+	if eerr := clearDir(dir); eerr != nil {
+		return fmt.Errorf("%v; and emptying %s: %v", err, dir, eerr)
+	}
+	fmt.Fprintf(log, "::warning::harness: %v; starting cold\n", err)
+	return nil
+}
+
+// unpack untars img's one layer into dir.
+func unpack(img v1.Image, dir string) error {
 	layers, err := img.Layers()
 	if err != nil {
 		return err
 	}
 	if len(layers) != 1 {
-		return fmt.Errorf("the cache %s has %d layers, not 1", ref, len(layers))
+		return fmt.Errorf("it has %d layers, not 1", len(layers))
 	}
 	rc, err := layers[0].Uncompressed()
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
-	if err := untar(rc, dir); err != nil {
-		return fmt.Errorf("unpacking the cache %s: %w", ref, err)
+	return untar(rc, dir)
+}
+
+// clearDir removes what dir holds, read-only folders too, and leaves dir.
+func clearDir(dir string) error {
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			os.Chmod(path, 0o755)
+		}
+		return nil
+	})
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return os.MkdirAll(dir, 0o755)
 	}
-	fmt.Fprintf(log, "harness: restored the cache %s\n", ref)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -114,7 +169,10 @@ func Save(ctx context.Context, ref, dir string, log io.Writer) error {
 	if desc, err := remote.Head(r, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain)); err == nil {
 		old = desc.Digest.String()
 	}
-	if err := remote.Write(r, img, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain)); err != nil {
+	err = retry.Do(ctx, log, "publishing the cache "+ref, func() error {
+		return remote.Write(r, img, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	})
+	if err != nil {
 		return fmt.Errorf("publishing the cache %s: %w", ref, err)
 	}
 	if info, err := os.Stat(f.Name()); err == nil {
