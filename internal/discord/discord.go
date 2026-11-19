@@ -25,10 +25,22 @@ type Message struct {
 	Button      *Button
 }
 
+// File is attached to a message. An image shows under its caption, in an
+// embed of its own.
 type File struct {
 	Name, ContentType string
 	Data              []byte
+	Caption           string
 }
+
+// maxImages is how many images show in embeds of their own: a message
+// holds ten embeds, and the first is the message's. The rest are attached
+// as they are.
+const maxImages = 9
+
+// captionLimit keeps a message's embeds within the 6000 characters Discord
+// takes for all of them, with the first's description at Limit.
+const captionLimit = 150
 
 // Button is pressed by someone in the server; ID says what for.
 type Button struct {
@@ -133,7 +145,19 @@ func (b *Bot) channel(name string) (string, error) {
 }
 
 func (m Message) embeds() []*discordgo.MessageEmbed {
-	return []*discordgo.MessageEmbed{{Title: m.Title, URL: m.URL, Description: m.Description, Color: m.Color}}
+	out := []*discordgo.MessageEmbed{{Title: m.Title, URL: m.URL, Description: m.Description, Color: m.Color}}
+	for _, f := range m.Files {
+		if len(out) > maxImages || !strings.HasPrefix(f.ContentType, "image/") {
+			continue
+		}
+		caption := f.Caption
+		if r := []rune(caption); len(r) > captionLimit {
+			caption = string(r[:captionLimit-1]) + "…"
+		}
+		out = append(out, &discordgo.MessageEmbed{Title: caption, Color: m.Color,
+			Image: &discordgo.MessageEmbedImage{URL: "attachment://" + f.Name}})
+	}
+	return out
 }
 
 func (m Message) components() []discordgo.MessageComponent {

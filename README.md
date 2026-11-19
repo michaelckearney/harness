@@ -327,8 +327,10 @@ attach files, and start threads in them.
 - **#pull-requests** has a message for each of the bots' pull requests,
   edited as it goes: where it is (the bot working on it, ready for review,
   approved and what the merge waits on, merged, released or failed), its
-  description, the images and videos in it, and **Approve**. A thread under
-  it says each change, and pings the owner when its release fails.
+  description, each image under its caption ("Before: …", "After: …"), the
+  videos in it, and **Approve**. The thread under it is for talking about
+  the pull request; the harness posts in it only to ping the owner when
+  its release fails.
 - **Approve** is the owner's alone, and approves as the owner's gh login,
   as approving on GitHub does: the App cannot approve its own pull requests.
 - **#daily-digest** has, each morning after `digest_hour` (8 on the

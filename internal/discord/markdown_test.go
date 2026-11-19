@@ -34,3 +34,26 @@ func TestSplit(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptions(t *testing.T) {
+	body := "![Before: the empty pane](https://x/1)\n![](https://x/2)\n<img alt=\"After: centred\" src=\"https://x/3\">"
+	got := Captions(body)
+	if len(got) != 2 || got["https://x/1"] != "Before: the empty pane" || got["https://x/3"] != "After: centred" {
+		t.Errorf("captions: %q", got)
+	}
+}
+
+func TestImagesShowUnderTheirCaptions(t *testing.T) {
+	m := Message{Title: "#1", Color: 1, Files: []File{
+		{Name: "1.png", ContentType: "image/png", Caption: "Before: it"},
+		{Name: "2.mp4", ContentType: "video/mp4"},
+		{Name: "3.png", ContentType: "image/png", Caption: strings.Repeat("a", 200)},
+	}}
+	e := m.embeds()
+	if len(e) != 3 || e[1].Title != "Before: it" || e[1].Image.URL != "attachment://1.png" || e[2].Image.URL != "attachment://3.png" {
+		t.Fatalf("embeds: %+v", e)
+	}
+	if n := len([]rune(e[2].Title)); n != captionLimit {
+		t.Errorf("a long caption is %d long", n)
+	}
+}

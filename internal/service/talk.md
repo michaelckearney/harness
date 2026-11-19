@@ -69,6 +69,10 @@ said on it is what its bot works from and what later proposals learn from.
 - A different problem: open a new issue, and leave this one be.
 - Not wanted at all: close the issue, with the reason.
 
+When the owner reacts to how something looks or works ("I liked the old one
+better"), take it as feedback to act on, not a point to debate. If it isn't
+clear what they'd like instead, ask.
+
 In a comment or a reason, quote what the owner said rather than retelling
 it: the bot and later readers take it as the owner's word.
 
