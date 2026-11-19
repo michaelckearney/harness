@@ -10,8 +10,9 @@ const Limit = 4096
 
 var (
 	comment = regexp.MustCompile(`(?s)<!--.*?-->`)
-	image   = regexp.MustCompile(`!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)`)
+	image   = regexp.MustCompile(`!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)`)
 	imgTag  = regexp.MustCompile(`(?i)<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>`)
+	imgAlt  = regexp.MustCompile(`(?i)\balt\s*=\s*["']([^"']*)["']`)
 	video   = regexp.MustCompile(`(?m)^[ \t]*(https://github\.com/user-attachments/assets/\S+)[ \t]*$`)
 	summary = regexp.MustCompile(`(?is)<summary>(.*?)</summary>`)
 	tags    = regexp.MustCompile(`(?i)</?(details|summary|p|div|br|sub|sup)\b[^>]*>`)
@@ -28,7 +29,8 @@ func Translate(body string) (text string, files []string) {
 	body = comment.ReplaceAllString(body, "")
 	take := func(re *regexp.Regexp) {
 		body = re.ReplaceAllStringFunc(body, func(m string) string {
-			files = append(files, re.FindStringSubmatch(m)[1])
+			sub := re.FindStringSubmatch(m)
+			files = append(files, sub[len(sub)-1])
 			return ""
 		})
 	}
@@ -90,4 +92,21 @@ func Split(text string, first, rest int) []string {
 		n = rest
 	}
 	return append(out, text)
+}
+
+// Captions are the alt texts of a description's images, by URL: what each
+// image shows, to show above it.
+func Captions(body string) map[string]string {
+	out := map[string]string{}
+	for _, m := range image.FindAllStringSubmatch(body, -1) {
+		if alt := strings.TrimSpace(m[1]); alt != "" {
+			out[m[2]] = alt
+		}
+	}
+	for _, m := range imgTag.FindAllStringSubmatch(body, -1) {
+		if a := imgAlt.FindStringSubmatch(m[0]); a != nil && strings.TrimSpace(a[1]) != "" {
+			out[m[1]] = strings.TrimSpace(a[1])
+		}
+	}
+	return out
 }

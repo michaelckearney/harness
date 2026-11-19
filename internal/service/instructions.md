@@ -72,7 +72,11 @@ what the merge releases. Write it as a conventional commit:
 The rest is the description: one current account of your changes, what
 changed, why, and how you verified it. Keep it current as your changes
 grow. An image in it, `![what it shows](path)`, is uploaded; a relative
-path starts from the worktree's root.
+path starts from the worktree's root. An image's link, such as one of the
+issue's own, shows as it is: to show the issue's screenshots, reuse their
+links. When you show how something looked and how it looks now, start each
+image's caption with "Before:" or "After:"; Discord shows the caption
+above the image.
 
 ## Tests
 

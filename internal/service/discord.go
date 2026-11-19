@@ -58,12 +58,11 @@ const (
 
 // post is a pull request's message in #pull-requests.
 type post struct {
-	Message string   `json:"message"`
-	Thread  string   `json:"thread"`
-	Status  string   `json:"status"` // the status line it last showed
-	Shown   string   `json:"shown"`  // a hash of what it last showed
-	Files   []string `json:"files"`  // the URLs of the files it shows
-	Done    bool     `json:"done"`   // merged and released, or closed: it changes no more
+	Message string `json:"message"`
+	Thread  string `json:"thread"`
+	Status  string `json:"status"` // the status line it last showed
+	Shown   string `json:"shown"`  // a hash of what it last showed
+	Done    bool   `json:"done"`   // merged and released, or closed: it changes no more
 }
 
 // openDiscord connects to the Discord server, if there is one.
@@ -185,15 +184,15 @@ func (s *Service) notifyPR(p *proj, po *post, t *store.Thread, n int) error {
 		return err
 	}
 	m, overflow, urls := message(pr, status, color, button)
-	shown := hash(m.Title, m.Description, fmt.Sprint(color), fmt.Sprint(button), strings.Join(urls, " "))
+	shown := hash(m.Title, m.Description, fmt.Sprint(color), fmt.Sprint(button), strings.Join(urls, " "), fmt.Sprint(discord.Captions(pr.Body)))
 	if shown == po.Shown {
 		po.Done = done
 		return nil
 	}
-	files := !slices.Equal(urls, po.Files)
-	if files || po.Message == "" {
-		m.Files = s.download(urls)
-	}
+	// The images show in embeds that name them by attachment, so every
+	// edit sends them again: an edit that kept the old ones would leave its
+	// embeds pointing at nothing.
+	m.Files = s.download(urls, discord.Captions(pr.Body))
 	if po.Message == "" {
 		id, err := s.chat.Post(prChannel, m)
 		if err != nil {
@@ -208,19 +207,18 @@ func (s *Service) notifyPR(p *proj, po *post, t *store.Thread, n int) error {
 				return err
 			}
 		}
-	} else if err := s.chat.Edit(prChannel, po.Message, m, files); err != nil {
+	} else if err := s.chat.Edit(prChannel, po.Message, m, true); err != nil {
 		return err
 	}
-	if status != po.Status && po.Thread != "" {
-		text := status
-		if failed {
-			text = fmt.Sprintf("<@%s> %s", s.cfg.Discord.Owner, status)
-		}
-		if err := s.chat.Say(po.Thread, text); err != nil {
+	// The message shows where the pull request is; the thread is for
+	// talking, and hears of a status only when it failed and needs the
+	// owner.
+	if failed && status != po.Status && po.Thread != "" {
+		if err := s.chat.Say(po.Thread, fmt.Sprintf("<@%s> %s", s.cfg.Discord.Owner, status)); err != nil {
 			return err
 		}
 	}
-	po.Status, po.Shown, po.Files, po.Done = status, shown, urls, done
+	po.Status, po.Shown, po.Done = status, shown, done
 	return nil
 }
 
@@ -326,7 +324,7 @@ func message(pr *github.PR, status string, color int, button *discord.Button) (d
 
 // download fetches the files a description shows, to attach them: those
 // too big for Discord are left out.
-func (s *Service) download(urls []string) []discord.File {
+func (s *Service) download(urls []string, captions map[string]string) []discord.File {
 	hc := &http.Client{Timeout: time.Minute}
 	var out []discord.File
 	for i, u := range urls {
@@ -351,7 +349,7 @@ func (s *Service) download(urls []string) []discord.File {
 		if ext == "" {
 			ext = path.Ext(u)
 		}
-		out = append(out, discord.File{Name: fmt.Sprintf("%d%s", i+1, ext), ContentType: ct, Data: data})
+		out = append(out, discord.File{Name: fmt.Sprintf("%d%s", i+1, ext), ContentType: ct, Data: data, Caption: captions[u]})
 	}
 	return out
 }
@@ -473,7 +471,7 @@ Write it with `+"`%s digest -`"+`, then stop.
 	text, urls := discord.Translate(text)
 	text = rewriteLinks(text, p.cfg.Repo, links)
 	m := discord.Message{Title: title, Description: truncate(text, discord.Limit), Color: blue}
-	m.Files = s.download(pick(urls, allowed))
+	m.Files = s.download(pick(urls, allowed), nil)
 	if _, err := s.chat.Post(digestChannel, m); err != nil {
 		s.log.Printf("discord: digest: %v", err)
 		return

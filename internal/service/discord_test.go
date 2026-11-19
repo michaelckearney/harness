@@ -112,7 +112,7 @@ func TestPullRequestsInDiscord(t *testing.T) {
 		!strings.Contains(m.Description, "Adds hello.txt.") || m.Button == nil || m.Button.Disabled {
 		t.Errorf("the message: %+v", m)
 	}
-	if got := chat.in["t1"]; len(got) != 1 || !strings.HasPrefix(got[0], "🟡 Ready for your review") {
+	if got := chat.in["t1"]; len(got) != 0 { // the message shows the status; the thread is for talking
 		t.Errorf("said in the thread: %q", got)
 	}
 
@@ -319,7 +319,7 @@ func TestTalkingInAPullRequestsThread(t *testing.T) {
 	h.step()
 	h.step()
 	pr := h.gh.pr("harness/" + fmt.Sprint(n))
-	if pr == nil || chat.in["t1"] == nil {
+	if pr == nil || !slices.Contains(chat.log, "thread 1 #"+fmt.Sprint(pr.Number)+" feat: add hello.txt") {
 		t.Fatalf("no pull request, or no thread for it: %q", chat.log)
 	}
 	write(t, filepath.Join(h.fake, "pr"), fmt.Sprint(pr.Number))
