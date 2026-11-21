@@ -221,7 +221,7 @@ func setup(t *testing.T) *harness {
 	// in a folder git ignores.
 	write(t, filepath.Join(h.work, ".gitignore"), "shots/\n")
 	write(t, filepath.Join(h.work, "harness.yaml"), "schema: 1\nrepo: o/r\ntriggers: [owner]\n"+
-		"agents: { default: opencode, allowed: [opencode, openai-codex] }\n"+
+		"agents: { work: opencode, allowed: [opencode, openai-codex] }\n"+
 		"prepare: echo \"$(pwd) GH_TOKEN=$GH_TOKEN\" >> \"$FAKE_DIR/prepared\"\n"+
 		"projects: { app: projects/app }\n")
 	write(t, filepath.Join(h.work, "framework/framework.yaml"), "command: [sh, ./fw.sh]\nverbs: { test: its tests, run: start it, look: { help: look at it, turn: true } }\n")

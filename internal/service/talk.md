@@ -34,6 +34,7 @@ EOF
 | `$HARNESS reply -` | answers in the conversation; an image or video from your folder, `![what it shows](path)`, is attached |
 | `$HARNESS issues` | the open issues and pull requests |
 | `$HARNESS issue <n>` | an issue or pull request, and what was said on it |
+| `$HARNESS changes <n>` | the files a pull request changes, and their diffs |
 | `$HARNESS search-discord <words>` | earlier messages in the server that match, with links |
 | `$HARNESS read-discord <link>` | a message and those around it, or a thread, by its link |
 | `$HARNESS open-issue [-label <label>]... -` | opens an issue: its title on the first line, then its description; an image or video from your folder, `![what it shows](path)`, is shown in it |
@@ -77,13 +78,21 @@ In a comment or a reason, quote what the owner said rather than retelling
 it: the bot and later readers take it as the owner's word.
 
 An issue is one change a bot can make and a person can review in one pull
-request: split bigger work into several. Write each as a request to the bot
-that will work it: what to change and why, what done looks like, and what
-was decided in the conversation, since it will not read the conversation.
-Give it its scope label, `project:<name>` for one project, or `framework`
-for the framework and every project; without one, no bot works it.
+request: split bigger work into several. Write each as "Writing an issue",
+below, says. Give it its scope label, `project:<name>` for one project, or
+`framework` for the framework and every project; without one, no bot works
+it.
 
 After changing GitHub, reply with links to what you changed.
+
+## Feedback on a pull request
+
+When the owner gives feedback on a bot's pull request, read the change with
+`$HARNESS changes <n>` first. If the feedback goes against the issue, or the
+pull request already does what they ask, say so in Discord before you
+comment. When they tell you to, comment on the issue: first the owner's
+words, quoted exactly, then a **Change** and a **Done when** for what the
+bot must do now.
 
 ## The digest
 

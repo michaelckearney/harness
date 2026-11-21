@@ -79,6 +79,9 @@ func (c *Codex) Run(ctx context.Context, t Turn) (string, error) {
 	if err == nil && failed != "" {
 		err = fmt.Errorf("codex: %s", failed)
 	}
+	if err != nil && atLimit(failed) {
+		return session, &LimitError{Msg: "codex: " + failed}
+	}
 	return session, err
 }
 

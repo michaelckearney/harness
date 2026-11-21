@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ClaudeCode runs each turn as `claude -p`, resuming the thread's session.
@@ -16,11 +17,14 @@ import (
 // its configuration is a folder of the service's, so neither the owner's
 // settings nor a project's .claude/settings.json can widen what it may do.
 type ClaudeCode struct {
-	Command  string
-	Dir      string // its configuration folder: CLAUDE_CONFIG_DIR
-	BaseURL  string // the proxy's route to Anthropic
-	Key      string // the proxy's token
-	Model    string // optional
+	Command string
+	Dir     string // its configuration folder: CLAUDE_CONFIG_DIR
+	BaseURL string // the proxy's route to Anthropic
+	Key     string // the proxy's token
+	Model   string // optional
+	// Reset, if set, is when the proxy last saw the subscription's limit
+	// reset: zero if it has not seen the limit reached.
+	Reset    func() time.Time
 	Policy   Policy
 	Launcher Launcher
 }
@@ -110,6 +114,15 @@ func (c *ClaudeCode) Run(ctx context.Context, t Turn) (string, error) {
 	})
 	if err == nil && failed != "" {
 		err = fmt.Errorf("claude: %s", failed)
+	}
+	if err != nil {
+		var until time.Time
+		if c.Reset != nil {
+			until = c.Reset()
+		}
+		if until.After(time.Now()) || atLimit(failed) {
+			return session, &LimitError{Msg: "claude: " + failed, Until: until}
+		}
 	}
 	return session, err
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Turn is one prompt in one thread's session.
@@ -39,6 +40,27 @@ type Agent interface {
 	Run(ctx context.Context, t Turn) (session string, err error)
 	// Stop ends whatever the agent keeps running between turns.
 	Stop()
+}
+
+// LimitError is a turn that stopped because the agent's subscription is at
+// its limit: another agent can take the turn.
+type LimitError struct {
+	Msg string
+	// Until is when the limit resets, if the agent said; zero if not.
+	Until time.Time
+}
+
+func (e *LimitError) Error() string { return e.Msg }
+
+// limitWords are what Claude Code and Codex say when a subscription is at
+// its limit.
+var limitWords = []string{"usage limit", "hit your limit", "rate limit", "429", "too many requests", "quota"}
+
+// atLimit reports whether an agent's error says its subscription is at its
+// limit.
+func atLimit(msg string) bool {
+	msg = strings.ToLower(msg)
+	return slices.ContainsFunc(limitWords, func(w string) bool { return strings.Contains(msg, w) })
 }
 
 // Policy is what every agent is told it may do.

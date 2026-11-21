@@ -17,7 +17,10 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Route is one upstream, served under /<Name>/.
@@ -39,6 +42,9 @@ type Proxy struct {
 	URL    string
 	routes map[string]Route
 	srv    *http.Server
+
+	mu    sync.Mutex
+	reset map[string]time.Time // by route: when its limit resets
 }
 
 // Start listens on a free loopback port.
@@ -51,7 +57,7 @@ func Start(routes []Route) (*Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Proxy{Token: "harness-" + hex.EncodeToString(tok), URL: "http://" + ln.Addr().String(), routes: map[string]Route{}}
+	p := &Proxy{Token: "harness-" + hex.EncodeToString(tok), URL: "http://" + ln.Addr().String(), routes: map[string]Route{}, reset: map[string]time.Time{}}
 	for _, r := range routes {
 		if r.BaseURL == "" {
 			continue
@@ -69,6 +75,31 @@ func Start(routes []Route) (*Proxy, error) {
 
 // Base is the base URL an agent uses for a route.
 func (p *Proxy) Base(route string) string { return p.URL + "/" + route }
+
+// Reset is when the route's limit resets, as the upstream said when it last
+// refused a request for it: zero if it has not.
+func (p *Proxy) Reset(route string) time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.reset[route]
+}
+
+// limited notes when a refused request's limit resets: Anthropic says so in
+// anthropic-ratelimit-unified-reset, in Unix seconds, and anyone in
+// Retry-After.
+func (p *Proxy) limited(route string, resp *http.Response) {
+	var until time.Time
+	if secs, err := strconv.ParseInt(resp.Header.Get("anthropic-ratelimit-unified-reset"), 10, 64); err == nil {
+		until = time.Unix(secs, 0)
+	} else if secs, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
+		until = time.Now().Add(time.Duration(secs) * time.Second)
+	} else {
+		return
+	}
+	p.mu.Lock()
+	p.reset[route] = until
+	p.mu.Unlock()
+}
 
 // Close stops the proxy.
 func (p *Proxy) Close() error { return p.srv.Shutdown(context.Background()) }
@@ -116,6 +147,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if route.Beta != "" {
 				pr.Out.Header.Set("anthropic-beta", addBeta(pr.Out.Header.Get("anthropic-beta"), route.Beta))
 			}
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			if resp.StatusCode == http.StatusTooManyRequests {
+				p.limited(name, resp)
+			}
+			return nil
 		},
 		// Models stream their replies.
 		FlushInterval: -1,

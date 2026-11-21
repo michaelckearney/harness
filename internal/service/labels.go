@@ -11,7 +11,7 @@ import (
 // classify reads which agent works an issue, and on what, from the labels a
 // trusted login put on it:
 //
-//	agent:<name>        the agent, such as agent:claude-code; agents.default without one
+//	agent:<name>        the agent, such as agent:claude-code; agents.work without one
 //	project:<name>      a project
 //	framework           the framework, and every project
 //
@@ -23,7 +23,7 @@ func (s *Service) classify(p *proj, n int) (agent, scope string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	agent = cfg.Agents.Default
+	agent = cfg.Agents.Work
 	var sc repo.Scope
 	var agentLabels, scopeLabels []string
 	for _, l := range labels {
@@ -60,14 +60,14 @@ type labelError string
 func (e labelError) Error() string { return string(e) }
 
 // labelProblem tells the owner once what is wrong with an issue's labels.
-// Only the server that runs the default agent says so, so the issue hears
+// Only the server that runs the work agent says so, so the issue hears
 // it once however many servers watch it.
 func (s *Service) labelProblem(p *proj, n int, err error) {
 	if _, ok := err.(labelError); !ok {
 		s.log.Printf("%s: labels: %v", key(p.cfg.Repo, n), err)
 		return
 	}
-	if p.repo == nil || !s.cfg.Runs(p.repo.Agents.Default) {
+	if p.repo == nil || !s.cfg.Runs(p.repo.Agents.Work) {
 		return
 	}
 	k := fmt.Sprintf("label-problem:%s#%d", p.cfg.Repo, n)

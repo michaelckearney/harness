@@ -178,6 +178,23 @@ func (f *fakeGitHub) issuesTitled(title string) []fakeIssue {
 	return out
 }
 
+// prFiles are the files a pull request changes, from origin.
+func (f *fakeGitHub) prFiles(p *fakePR) []map[string]any {
+	span := "refs/heads/" + p.Base + "...refs/heads/" + p.Head
+	out, _ := exec.Command("git", "-C", f.origin, "diff", "--name-status", span).Output()
+	statuses := map[string]string{"A": "added", "M": "modified", "D": "removed"}
+	var files []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		status, name, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		patch, _ := exec.Command("git", "-C", f.origin, "diff", span, "--", name).Output()
+		files = append(files, map[string]any{"filename": name, "status": statuses[status], "patch": string(patch)})
+	}
+	return files
+}
+
 func (f *fakeGitHub) prJSON(p *fakePR) map[string]any {
 	j := map[string]any{"number": p.Number, "node_id": fmt.Sprintf("PR_%d", p.Number), "state": p.State, "draft": p.Draft, "body": p.Body, "title": p.Title,
 		"html_url": fmt.Sprintf("https://github.test/%s/pull/%d", f.repo, p.Number)}
@@ -196,6 +213,7 @@ var (
 	reComments = regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/(\d+)/comments$`)
 	reEvents   = regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/(\d+)/events$`)
 	rePR       = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)$`)
+	rePRFiles  = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)/files$`)
 	reMerge    = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)/merge$`)
 	reReviews  = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)/reviews$`)
 	reRC       = regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/(\d+)/comments$`)
@@ -334,6 +352,13 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			pr.Title = title
 		}
 		reply(f.prJSON(pr))
+	case r.Method == "GET" && rePRFiles.MatchString(p):
+		pr := f.prs[num(rePRFiles)]
+		if pr == nil {
+			http.NotFound(w, r)
+			return
+		}
+		reply(f.prFiles(pr))
 	case r.Method == "GET" && rePR.MatchString(p):
 		pr := f.prs[num(rePR)]
 		if pr == nil {

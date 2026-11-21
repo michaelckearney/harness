@@ -22,7 +22,7 @@ import (
 var taskInstructions string
 
 // taskCommands are the commands of a task's run, for the bot's help.
-const taskCommands = "In a task's run, the commands are: issues, issue <n>, search-discord <words>, read-discord <link>, " +
+const taskCommands = "In a task's run, the commands are: issues, issue <n>, changes <n>, search-discord <words>, read-discord <link>, " +
 	"open-issue -label <scope> -, done, and the framework's verbs for a turn, such as record -p <project>."
 
 // beforeTimeout is how long a task's before may run.
@@ -150,7 +150,8 @@ func (s *Service) runTask(p *proj, name string, task *repo.Task, head string, op
 	}
 	fmt.Fprintf(&b, "\nThe task, from %s:\n\n%s\n\nOpen at most one issue, with `%s open-issue -label <scope> -`, or none if nothing is worth it. Then end the turn with `%s done`.\n",
 		task.Prompt, strings.TrimSpace(string(prompt)), s.Command, s.Command)
-	if _, err := s.talkTurn(p, t, "", fmt.Sprintf("task-%s-%s", name, time.Now().Format("2006-01-02-1504")), b.String()); err != nil {
+	text := b.String()
+	if _, _, err := s.talkWith(p, t, "", "", fmt.Sprintf("task-%s-%s", name, time.Now().Format("2006-01-02-1504")), func(bool) string { return text }); err != nil {
 		s.log.Printf("task %s: %v", name, err)
 	}
 	if t.opened == 0 {

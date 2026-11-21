@@ -7,7 +7,7 @@ import (
 )
 
 func TestUnrelatedChangesAreMergedForTheBot(t *testing.T) {
-	cfg, err := repo.Parse([]byte("schema: 1\nrepo: o/r\ntriggers: [owner]\nagents: { default: claude-code }\n" +
+	cfg, err := repo.Parse([]byte("schema: 1\nrepo: o/r\ntriggers: [owner]\nagents: { work: claude-code, allowed: [claude-code] }\n" +
 		"projects: { harbor: projects/harbor, slipway: projects/slipway }\n"))
 	if err != nil {
 		t.Fatal(err)

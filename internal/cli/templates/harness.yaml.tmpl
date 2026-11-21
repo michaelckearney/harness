@@ -7,7 +7,11 @@ repo: {{.Repo}}
 # Who can give the bots work: only their issues, comments, reviews, and labels count.
 triggers: [{{.Owner}}]
 agents:
-  default: opencode
+  # talk talks in Discord, writes the digest, and runs the tasks, which open
+  # issues: the first agent not at its subscription's limit takes each turn.
+  talk: [opencode]
+  # work works an issue with no agent:<name> label.
+  work: opencode
   # An agent that sends the code to a third party belongs here only if whoever
   # owns the code agreed to it.
   allowed: [opencode]
