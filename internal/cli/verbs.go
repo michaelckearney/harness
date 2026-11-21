@@ -113,7 +113,7 @@ func Verb(ctx context.Context, verb string, args []string, stdout, stderr io.Wri
 		}
 		call.Target = targets[0]
 		if verb == contract.Build {
-			v, err := gitversion.Build(ctx, root, gitversion.For(call.Target.Project, call.Target.ProjectPath))
+			v, err := gitversion.Build(ctx, root, gitversion.For(call.Target.Project, call.Target.ProjectPath, call.Target.FrameworkPath))
 			if err != nil {
 				return &Error{err.Error()}
 			}

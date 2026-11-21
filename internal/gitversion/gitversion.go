@@ -138,19 +138,22 @@ func Conventional(subject string) bool {
 }
 
 // Series is what one line of releases is in a monorepo: its tags start with
-// Prefix, such as harbor/v0.2.0, and only the commits that change Path count
-// for it. The zero Series is the whole repository, tagged v0.2.0.
+// Prefix, such as harbor/v0.2.0, and only the commits that change one of
+// Paths count for it. The zero Series is the whole repository, tagged v0.2.0.
 type Series struct {
 	Prefix string
-	Path   string
+	Paths  []string
 }
 
-// For is the series of a project, or the whole repository for "".
-func For(project, path string) Series {
+// For is the series of a project, or the whole repository for "". A
+// project's paths are its own folder and the framework's: every build of
+// the project compiles the framework in, so a change to it is a change to
+// the project.
+func For(project, projectPath, frameworkPath string) Series {
 	if project == "" {
 		return Series{}
 	}
-	return Series{Prefix: project + "/", Path: path}
+	return Series{Prefix: project + "/", Paths: []string{projectPath, frameworkPath}}
 }
 
 // Tag is v's tag in the series.
@@ -206,8 +209,8 @@ func Calculate(ctx context.Context, dir string, series Series) (Plan, error) {
 	// First parent only: the default branch's own commits, one per merged
 	// pull request, not the commits on the branches merged into it.
 	logArgs := []string{"log", "--first-parent", "--format=%H%x00%s%x00%b%x1e", series.Tag(*last) + "..HEAD"}
-	if series.Path != "" {
-		logArgs = append(logArgs, "--", series.Path)
+	if len(series.Paths) > 0 {
+		logArgs = append(append(logArgs, "--"), series.Paths...)
 	}
 	out, err := git(ctx, dir, logArgs...)
 	if err != nil {

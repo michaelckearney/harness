@@ -22,8 +22,8 @@ const releaseUsage = `usage: harness release [-p <project>] [-plan | -notes] [-v
 For the default branch's pipeline. Each project has its own releases,
 tagged <project>/v<version>, such as harbor/v0.2.0. A project's version
 comes from the titles of the pull requests merged since its last tag that
-changed its folder: feat a minor release, fix a patch, feat! a breaking
-change (see the README).
+changed its folder or the framework's: feat a minor release, fix a patch,
+feat! a breaking change (see the README).
 
 Without -p, every project with something to release is released.
 
@@ -83,7 +83,7 @@ func releaseOne(ctx context.Context, root string, cfg *repo.Config, name, explic
 	if err != nil {
 		return err
 	}
-	series := gitversion.For(name, t.ProjectPath)
+	series := gitversion.For(name, t.ProjectPath, t.FrameworkPath)
 	p, err := gitversion.Calculate(ctx, root, series)
 	if err != nil {
 		return &Error{err.Error()}

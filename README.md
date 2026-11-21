@@ -401,7 +401,8 @@ Every change reaches `main` through a squash-merged pull request whose
 title is a conventional commit: the harness makes sure of it for the bots'
 pull requests. Each project is released on its own,
 tagged `<project>/v<version>`, from the titles of the pull requests merged
-since its last tag that changed its folder: `fix:` a patch, `feat:` a minor
+since its last tag that changed its folder or the framework's, since every
+build of a project compiles the framework in: `fix:` a patch, `feat:` a minor
 release (a patch before 1.0), `feat!:` a major one (minor before 1.0).
 `harness release -plan` prints what would be released. Nothing writes a
 version into the repository.
