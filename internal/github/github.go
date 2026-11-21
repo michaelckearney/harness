@@ -495,6 +495,22 @@ func (c *Client) PR(repo string, n int) (*PR, error) {
 	return &p, c.call(repo, "GET", fmt.Sprintf("/repos/%s/pulls/%d", repo, n), nil, &p)
 }
 
+// PRFile is a file a pull request changes, and how.
+type PRFile struct {
+	Filename  string `json:"filename"`
+	Status    string `json:"status"` // added, modified, removed, renamed, ...
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	// Patch is the file's diff; GitHub leaves it out of a binary file and
+	// of one too large to show.
+	Patch string `json:"patch"`
+}
+
+// PRFiles are the files a pull request changes.
+func (c *Client) PRFiles(repo string, n int) ([]PRFile, error) {
+	return list[PRFile](c, repo, fmt.Sprintf("/repos/%s/pulls/%d/files", repo, n))
+}
+
 func (c *Client) CreatePR(repo, title, body, head, base string, draft bool) (*PR, error) {
 	var p PR
 	in := map[string]any{"title": title, "body": body, "head": head, "base": base, "draft": draft}

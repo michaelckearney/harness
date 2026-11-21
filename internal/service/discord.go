@@ -461,7 +461,7 @@ Write it with `+"`%s digest -`"+`, then stop.
 %s`, title, s.Command, facts.String())
 
 	t := &talk{kind: "digest", files: allowed}
-	if _, err := s.runTalk(p, t, "", "digest-"+time.Now().Format("2006-01-02"), prompt); err != nil {
+	if _, _, err := s.runTalk(p, t, "", "", "digest-"+time.Now().Format("2006-01-02"), func(bool) string { return prompt }); err != nil {
 		s.log.Printf("discord: digest: %v", err)
 	}
 	text := t.digest

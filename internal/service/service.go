@@ -44,6 +44,7 @@ type Service struct {
 	draining bool            // stopping: no new turns start
 	socket   os.FileInfo     // the socket file this service made
 	agents   map[string]agents.Agent
+	limits   map[string]time.Time // the talk agents at their limit, until when
 	proxy    *proxy.Proxy
 	// Command is the harness, as the bots run it: the one command their
 	// shell may run.
@@ -98,6 +99,7 @@ func New(cfg *host.Config, logger *log.Logger) (*Service, error) {
 		wake:    make(chan struct{}, 1),
 		live:    newHub(),
 		retries: map[int][]retry{},
+		limits:  map[string]time.Time{},
 		Command: "harness",
 	}
 	s.projects = []*proj{{cfg: &projCfg{Repo: cfg.Repo, Name: cfg.Name, GitURL: cfg.GitURL}, inbox: map[int][]store.Event{}}}

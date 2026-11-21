@@ -20,6 +20,7 @@ The shell runs `$HARNESS` commands and nothing else.
 |---|---|
 | `$HARNESS issues` | the open issues and pull requests |
 | `$HARNESS issue <n>` | an issue or pull request, and what was said on it |
+| `$HARNESS changes <n>` | the files a pull request changes, and their diffs |
 | `$HARNESS search-discord <words>` | earlier messages in the Discord server that match, with links |
 | `$HARNESS read-discord <link>` | a message and those around it, or a thread, by its link |
 | `$HARNESS open-issue -label <scope> -` | opens the issue: its title on the first line, then its description, on standard input; an image or video from your folder, `![what it shows](path)`, is shown in it |
@@ -33,9 +34,8 @@ exactly one scope label, `-label project:<name>` for one project or
 `-label framework` for the framework and every project; the harness adds the
 task's own label. A run opens one issue at most.
 
-Write it as a request to the bot that will work it: what to change and why,
-what done looks like, and anything it needs to know, since it will not see
-this turn. Keep it to one change a person can review in one pull request.
+Write it as "Writing an issue", below, says. Keep it to one change a person
+can review in one pull request.
 
 Opening no issue is a fine outcome: when nothing is worth doing, say nothing
 and end the turn with `done`. The task runs again once the default branch

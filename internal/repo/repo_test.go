@@ -8,7 +8,7 @@ import (
 const good = `schema: 1
 repo: o/r
 triggers: [owner]
-agents: { default: opencode, allowed: [opencode, claude-code] }
+agents: { talk: [claude-code, opencode], work: opencode, allowed: [opencode, claude-code] }
 projects:
   harbor: projects/harbor
   slipway: projects/slipway
@@ -19,6 +19,13 @@ func TestParse(t *testing.T) {
 	c, err := Parse([]byte(good))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if a := c.Agents; a.Work != "opencode" || len(a.Talk) != 2 || a.Talk[0] != "claude-code" {
+		t.Errorf("agents: %+v", a)
+	}
+	c, err = Parse([]byte(strings.Replace(good, "talk: [claude-code, opencode], ", "", 1)))
+	if err != nil || len(c.Agents.Talk) != 1 || c.Agents.Talk[0] != "opencode" {
+		t.Errorf("talk without one is work: %+v %v", c.Agents, err)
 	}
 	if c.Framework != "framework" || c.Projects["harbor"].Path != "projects/harbor" {
 		t.Errorf("framework and projects: %s %+v", c.Framework, c.Projects)
@@ -38,6 +45,10 @@ func TestParse(t *testing.T) {
 		{"site: projects/site|site: { path: projects/site }", "a project is its folder"},
 		{"projects:|framework: framework\nprojects:", "framework: is gone"},
 		{"triggers: [owner]|triggers: []", "triggers"},
+		{"talk: [claude-code, opencode], work: opencode|default: opencode", "agents.default: is gone"},
+		{"talk: [claude-code, opencode]|talk: [openai-codex]", "must be one of agents.allowed"},
+		{"talk: [claude-code, opencode]|talk: [opencode, opencode]", "there twice"},
+		{"work: opencode, allowed|work: openai-codex, allowed", "agents.work"},
 		{"schema: 1|schema: 1\nextra: 1", "extra"},
 		{"projects:|tasks: { design: { prompt: d.md, label: design } }\nprojects:", "max_open"},
 		{"projects:|tasks: { design: { prompt: d.md, label: framework, max_open: 1 } }\nprojects:", "picks a scope"},

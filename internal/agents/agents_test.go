@@ -141,3 +141,16 @@ func TestLauncherAsTheBotsUser(t *testing.T) {
 		t.Errorf("env: %q", env)
 	}
 }
+
+func TestAtLimit(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"You've hit your usage limit. Try again at 3:45 PM.":       true,
+		"Claude AI usage limit reached|1700000000":                 true,
+		"exceeded retry limit, last status: 429 Too Many Requests": true,
+		"the command failed: exit status 1":                        false,
+	} {
+		if atLimit(msg) != want {
+			t.Errorf("%q: %v", msg, !want)
+		}
+	}
+}

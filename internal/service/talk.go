@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,12 @@ import (
 //go:embed talk.md
 var talkInstructions string
 
+// specInstructions are how the talk agents write an issue, in a
+// conversation and in a task alike.
+//
+//go:embed spec.md
+var specInstructions string
+
 // talk is a turn the bot takes on the Discord checkout: a conversation it
 // was mentioned in, the morning's digest, or a run of one of the monorepo's
 // tasks. One runs at a time.
@@ -31,6 +38,7 @@ type talk struct {
 	thread  string // the Discord thread a conversation's replies go to
 	owner   bool   // the owner mentioned the bot: it may change GitHub
 	replied bool
+	acted   bool     // it replied, wrote the digest, or changed GitHub
 	digest  string   // the digest the bot wrote
 	files   []string // the files a digest may show
 	task    string   // the task a run is of
@@ -40,6 +48,9 @@ type talk struct {
 
 // conv is what the service keeps of a conversation between turns.
 type conv struct {
+	// Agent is the agent the session is of: it keeps the conversation
+	// until it is at its limit.
+	Agent   string `json:"agent"`
 	Session string `json:"session"`
 	Last    string `json:"last"` // the newest message the bot has seen
 }
@@ -68,22 +79,82 @@ func (s *Service) enqueue(job func()) bool {
 	}
 }
 
-// talkAgent is the agent that talks in Discord: the monorepo's default, if
-// this server runs it.
-func (s *Service) talkAgent(p *proj) agents.Agent {
+// limitWait is how long an agent at its limit is passed over when it did
+// not say when the limit resets.
+const limitWait = time.Hour
+
+// talkAgents are the agents of agents.talk this server runs, in turn order:
+// those not at their limit first, as harness.yaml orders them, then those
+// that are, in case the limit has reset early.
+func (s *Service) talkAgents(p *proj) []string {
 	s.mu.Lock()
-	cfg := p.repo
+	defer s.mu.Unlock()
+	if p.repo == nil {
+		return nil
+	}
+	var free, limited []string
+	for _, name := range p.repo.Agents.Talk {
+		if s.agents[name] == nil {
+			continue
+		}
+		if time.Now().Before(s.limits[name]) {
+			limited = append(limited, name)
+		} else {
+			free = append(free, name)
+		}
+	}
+	return append(free, limited...)
+}
+
+// atLimit notes that an agent is at its limit until it resets.
+func (s *Service) atLimit(name string, until time.Time) {
+	if !until.After(time.Now()) {
+		until = time.Now().Add(limitWait)
+	}
+	s.mu.Lock()
+	s.limits[name] = until
 	s.mu.Unlock()
-	if cfg != nil && s.agents[cfg.Agents.Default] != nil {
-		return s.agents[cfg.Agents.Default]
+	s.log.Printf("discord: %s is at its limit until %s", name, until.Format(time.RFC3339))
+}
+
+// talkWith runs a Discord turn with the first of the talk agents, keeping
+// the agent a session is of while it is not at its limit. When an agent
+// reaches its limit before the turn did anything, the next one takes the
+// turn, in a new session. prompt is the turn's prompt, for a session that
+// goes on or one that starts. It returns the agent and its session.
+func (s *Service) talkWith(p *proj, t *talk, agent, session, title string, prompt func(resume bool) string) (string, string, error) {
+	names := s.talkAgents(p)
+	if len(names) == 0 {
+		return "", "", fmt.Errorf("this server runs none of agents.talk")
 	}
-	if a := s.agents[repo.OpenCode]; a != nil {
-		return a
+	if i := slices.Index(names, agent); i > 0 && !s.limited(agent) {
+		names = append([]string{agent}, slices.Delete(slices.Clone(names), i, i+1)...)
 	}
-	for _, name := range s.cfg.Agents {
-		return s.agents[name]
+	var err error
+	for _, name := range names {
+		resume := name == agent && session != ""
+		sess := ""
+		if resume {
+			sess = session
+		}
+		sess, err = s.talkTurn(p, t, s.agents[name], sess, title, prompt(resume))
+		var lim *agents.LimitError
+		if !errors.As(err, &lim) {
+			return name, sess, err
+		}
+		s.atLimit(name, lim.Until)
+		if t.acted {
+			return name, sess, err
+		}
 	}
-	return nil
+	return agent, session, err
+}
+
+// limited reports whether an agent is at its limit.
+func (s *Service) limited(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Now().Before(s.limits[name])
 }
 
 // prepareTalk puts the checkout at the default branch as GitHub has it.
@@ -115,20 +186,16 @@ func (s *Service) prepareTalk(p *proj) error {
 	return err
 }
 
-// runTalk runs one Discord turn with the talking agent, on a fresh checkout.
-func (s *Service) runTalk(p *proj, t *talk, session, title, prompt string) (string, error) {
+// runTalk runs one Discord turn with the talk agents, on a fresh checkout.
+func (s *Service) runTalk(p *proj, t *talk, agent, session, title string, prompt func(resume bool) string) (string, string, error) {
 	if err := s.prepareTalk(p); err != nil {
-		return "", fmt.Errorf("checking out %s: %w", p.base, err)
+		return agent, session, fmt.Errorf("checking out %s: %w", p.base, err)
 	}
-	return s.talkTurn(p, t, session, title, prompt)
+	return s.talkWith(p, t, agent, session, title, prompt)
 }
 
-// talkTurn runs one Discord turn on the checkout as it is.
-func (s *Service) talkTurn(p *proj, t *talk, session, title, prompt string) (string, error) {
-	a := s.talkAgent(p)
-	if a == nil {
-		return "", fmt.Errorf("this server runs no agent")
-	}
+// talkTurn runs one Discord turn with agent a, on the checkout as it is.
+func (s *Service) talkTurn(p *proj, t *talk, a agents.Agent, session, title, prompt string) (string, error) {
 	s.mu.Lock()
 	s.talking = t
 	s.mu.Unlock()
@@ -155,6 +222,9 @@ func (s *Service) talkSystem(p *proj, kind string) string {
 		instructions = taskInstructions
 	}
 	b.WriteString(strings.ReplaceAll(instructions, "$HARNESS", s.Command))
+	if kind != "digest" {
+		b.WriteString("\n" + specInstructions)
+	}
 	s.mu.Lock()
 	cfg := p.repo
 	s.mu.Unlock()
@@ -216,22 +286,33 @@ func (s *Service) converse(m discord.Mention) {
 		}
 	}
 	me := s.chat.Me()
-	var lines []string
 	last := c.Last
 	for _, msg := range history {
-		if c.Session != "" && !olderID(c.Last, msg.ID) {
-			continue
-		}
 		if olderID(last, msg.ID) {
 			last = msg.ID
 		}
-		if msg.AuthorID == me {
-			continue
-		}
-		lines = append(lines, s.talkLine(p, thread, msg))
 	}
-	if len(lines) == 0 {
-		lines = append(lines, s.talkLine(p, thread, m.Msg))
+	// lines are what the prompt shows of the thread: what was said since
+	// the bot's last reply, for a session that goes on, or all of it, with
+	// the bot's own replies, for one that starts.
+	lines := func(resume bool) []string {
+		var lines []string
+		for _, msg := range history {
+			if resume && !olderID(c.Last, msg.ID) {
+				continue
+			}
+			if msg.AuthorID == me {
+				if !resume {
+					lines = append(lines, fmt.Sprintf("[%s] you: %s", msg.Time.Format("2006-01-02 15:04"), msg.Content))
+				}
+				continue
+			}
+			lines = append(lines, s.talkLine(p, thread, msg))
+		}
+		if len(lines) == 0 {
+			lines = append(lines, s.talkLine(p, thread, m.Msg))
+		}
+		return lines
 	}
 
 	owner := m.AuthorID == s.cfg.Discord.Owner
@@ -239,27 +320,33 @@ func (s *Service) converse(m discord.Mention) {
 	if m.Thread {
 		where = "the thread " + m.Where
 	}
-	var prompt strings.Builder
-	fmt.Fprintf(&prompt, "%s mentioned you in %s.\n", m.Author, where)
+	var head strings.Builder
+	prompt := &head
+	fmt.Fprintf(prompt, "%s mentioned you in %s.\n", m.Author, where)
 	if owner {
 		prompt.WriteString("They are the owner: if they tell you to, you may open issues, comment, and label on GitHub.\n")
 	} else {
 		prompt.WriteString("They are not the owner: you cannot open issues, comment, or label on GitHub this turn; say what you would do, for the owner to confirm.\n")
 	}
 	if pr := s.prOfThread(thread); pr != 0 {
-		fmt.Fprintf(&prompt, "This thread is under pull request #%d's message in #pull-requests", pr)
+		fmt.Fprintf(prompt, "This thread is under pull request #%d's message in #pull-requests", pr)
 		if n := s.issueOf(p, pr); n != 0 {
-			fmt.Fprintf(&prompt, ", the pull request a bot opened for issue #%d", n)
+			fmt.Fprintf(prompt, ", the pull request a bot opened for issue #%d", n)
 		}
-		prompt.WriteString(": what is said here is about them. Read them with issue <n>.\n")
+		prompt.WriteString(": what is said here is about them. Read them with issue <n>, and the pull request's code with changes <n>.\n")
 	}
-	if c.Session == "" {
-		prompt.WriteString("\nThe conversation so far, oldest first:\n\n")
-	} else {
-		prompt.WriteString("\nWhat was said since your last reply, oldest first:\n\n")
+	promptFor := func(resume bool) string {
+		var b strings.Builder
+		b.WriteString(head.String())
+		if resume {
+			b.WriteString("\nWhat was said since your last reply, oldest first:\n\n")
+		} else {
+			b.WriteString("\nThe conversation so far, oldest first:\n\n")
+		}
+		b.WriteString(strings.Join(lines(resume), "\n"))
+		b.WriteString("\n\nAnswer with `" + s.Command + " reply -`.\n")
+		return b.String()
 	}
-	prompt.WriteString(strings.Join(lines, "\n"))
-	prompt.WriteString("\n\nAnswer with `" + s.Command + " reply -`.\n")
 
 	t := &talk{kind: "conversation", thread: thread, owner: owner}
 	stop := make(chan struct{})
@@ -273,7 +360,7 @@ func (s *Service) converse(m discord.Mention) {
 			}
 		}
 	}()
-	session, err := s.runTalk(p, t, c.Session, "discord-"+thread, prompt.String())
+	agent, session, err := s.runTalk(p, t, c.Agent, c.Session, "discord-"+thread, promptFor)
 	close(stop)
 	if err != nil {
 		s.log.Printf("discord: conversation %s: %v", thread, err)
@@ -281,7 +368,7 @@ func (s *Service) converse(m discord.Mention) {
 	if !t.replied {
 		s.chat.Say(thread, "I could not put an answer together that time. Mention me again to have another go.")
 	}
-	c.Session, c.Last = session, last
+	c.Agent, c.Session, c.Last = agent, session, last
 	if data, err := json.Marshal(c); err == nil {
 		s.st.Set(key, string(data))
 	}
@@ -317,18 +404,27 @@ func olderID(a, b string) bool {
 }
 
 // talkCommands are the commands of a Discord turn, for the bot's help.
-const talkCommands = "In Discord, the commands are: reply -, issues, issue <n>, search-discord <words>, read-discord <link>, " +
+const talkCommands = "In Discord, the commands are: reply -, issues, issue <n>, changes <n>, search-discord <words>, read-discord <link>, " +
 	"open-issue [-label <label>]... -, comment <n> -, label <n> <label>..., close <n> -, reopen <n> -, digest -, and done."
+
+// acts are the Discord turn's commands that leave something behind: a turn
+// that ran one is not taken again by another agent.
+var acts = []string{"reply", "digest", "open-issue", "comment", "label", "close", "reopen"}
 
 // handleTalk answers a command run in the Discord checkout, during a
 // Discord turn.
-func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
+func (s *Service) handleTalk(p *proj, req rpc.Request) (out string, err error) {
 	s.mu.Lock()
 	t := s.talking
 	s.mu.Unlock()
 	if t == nil {
 		return "", fixable("there is no Discord turn running; the harness only acts during one")
 	}
+	defer func() {
+		if err == nil && slices.Contains(acts, req.Cmd) {
+			t.acted = true
+		}
+	}()
 	needOwner := func() error {
 		if t.kind == "task" {
 			return fixable("a task opens issues, and changes nothing else on GitHub")
@@ -435,6 +531,12 @@ func (s *Service) handleTalk(p *proj, req rpc.Request) (string, error) {
 			return "", err
 		}
 		return s.describeIssue(p, n)
+	case "changes":
+		n, err := number()
+		if err != nil {
+			return "", err
+		}
+		return s.describeChanges(p, n)
 	case "search-discord":
 		if err := discordOnly(); err != nil {
 			return "", err
@@ -689,6 +791,39 @@ func (s *Service) describeIssue(p *proj, n int) (string, error) {
 	}
 	for _, c := range comments {
 		fmt.Fprintf(&b, "\n--- %s, %s:\n%s\n", c.User.Login, c.CreatedAt.Format("2006-01-02 15:04"), strings.TrimSpace(c.Body))
+	}
+	return b.String(), nil
+}
+
+// changesLimit is about how much of a pull request's diff changes shows.
+const changesLimit = 60_000
+
+// describeChanges is the files a pull request changes, and their diffs, so
+// the talk bot can read a change it cannot check out.
+func (s *Service) describeChanges(p *proj, n int) (string, error) {
+	pr, err := s.gh.PR(p.cfg.Repo, n)
+	if err != nil {
+		return "", fixable(fmt.Sprintf("#%d: %v", n, err))
+	}
+	files, err := s.gh.PRFiles(p.cfg.Repo, n)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Pull request #%d: %s\n%d files changed\n\n", n, pr.Title, len(files))
+	for _, f := range files {
+		fmt.Fprintf(&b, "%s %s (+%d -%d)\n", f.Status, f.Filename, f.Additions, f.Deletions)
+	}
+	for i, f := range files {
+		if b.Len() > changesLimit {
+			fmt.Fprintf(&b, "\n(the diffs of the last %d files are left out: the change is too large to show whole)\n", len(files)-i)
+			break
+		}
+		if f.Patch == "" {
+			fmt.Fprintf(&b, "\n--- %s: no diff to show (binary, or too large)\n", f.Filename)
+			continue
+		}
+		fmt.Fprintf(&b, "\n--- %s\n%s\n", f.Filename, f.Patch)
 	}
 	return b.String(), nil
 }

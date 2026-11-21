@@ -72,7 +72,7 @@ func (s *Service) startAgents(logger *log.Logger) error {
 				Model: agents.OpenCodeModel{ID: c.Model.ID, BaseURL: px.Base("model"), Key: px.Token, Vision: c.Model.Vision, Context: c.Model.Context}}
 		case repo.ClaudeCode:
 			s.agents[name] = &agents.ClaudeCode{Command: c.Commands[name], Dir: dir, Policy: policy, Launcher: l,
-				BaseURL: px.Base("anthropic"), Key: px.Token}
+				BaseURL: px.Base("anthropic"), Key: px.Token, Reset: func() time.Time { return px.Reset("anthropic") }}
 		case repo.Codex:
 			s.agents[name] = &agents.Codex{Command: c.Commands[name], Dir: dir, Policy: policy, Launcher: l,
 				AuthFile: c.Codex.AuthFile}

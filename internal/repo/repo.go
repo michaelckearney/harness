@@ -8,8 +8,9 @@
 //	repo: owner/name
 //	triggers: [owner]
 //	agents:
-//	  default: opencode
-//	  allowed: [opencode, claude-code, codex]
+//	  talk: [openai-codex, claude-code]
+//	  work: opencode
+//	  allowed: [opencode, claude-code, openai-codex]
 //	projects:
 //	  harbor: projects/harbor
 //	tasks:
@@ -106,10 +107,17 @@ type Task struct {
 	MaxOpen *int `yaml:"max_open"`
 }
 
-// Agents says which agents the bots may be.
+// Agents says which agents the bots may be, and what each does.
 type Agents struct {
-	// Default works an issue with no agent label.
-	Default string `yaml:"default"`
+	// Talk are the agents that talk in Discord, write the digest, and run
+	// the tasks, which open issues: the first that is not at its
+	// subscription's limit takes each turn.
+	Talk []string `yaml:"talk"`
+	// Work works an issue with no agent label.
+	Work string `yaml:"work"`
+	// OldDefault is the default: key agents used to have, there only to
+	// say what took its place.
+	OldDefault string `yaml:"default"`
 	// Allowed are the agents an issue's label may choose. An agent that
 	// sends the code to a third party belongs here only if whoever owns the
 	// code agreed to it.
@@ -166,19 +174,33 @@ func (c *Config) check() error {
 		return fail("triggers: list who can give the bots work")
 	}
 	a := &c.Agents
-	if a.Default == "" {
-		a.Default = OpenCode
+	if a.OldDefault != "" {
+		return fail("agents.default: is gone: agents.work works the issues, and agents.talk talks in Discord and runs the tasks")
+	}
+	if a.Work == "" {
+		a.Work = OpenCode
+	}
+	if len(a.Talk) == 0 {
+		a.Talk = []string{a.Work}
 	}
 	if len(a.Allowed) == 0 {
-		a.Allowed = []string{a.Default}
+		a.Allowed = []string{a.Work}
 	}
 	for _, name := range a.Allowed {
 		if !slices.Contains(AllAgents, name) {
 			return fail("agents.allowed: %q is not an agent; the agents are %s", name, strings.Join(AllAgents, ", "))
 		}
 	}
-	if !slices.Contains(a.Allowed, a.Default) {
-		return fail("agents.default %q must be one of agents.allowed", a.Default)
+	if !slices.Contains(a.Allowed, a.Work) {
+		return fail("agents.work %q must be one of agents.allowed", a.Work)
+	}
+	for i, name := range a.Talk {
+		if !slices.Contains(a.Allowed, name) {
+			return fail("agents.talk: %q must be one of agents.allowed", name)
+		}
+		if slices.Contains(a.Talk[:i], name) {
+			return fail("agents.talk: %q is there twice", name)
+		}
 	}
 
 	paths := map[string]string{}

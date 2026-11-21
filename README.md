@@ -29,7 +29,8 @@ harness: v0.7.0              # the harness the monorepo uses; servers follow it
 repo: owner/name
 triggers: [owner]            # who can give the bots work
 agents:
-  default: opencode
+  talk: [openai-codex, claude-code]  # Discord, the digest, and tasks; see Agents' roles
+  work: opencode                     # works an issue with no agent:<name> label
   allowed: [opencode, claude-code, openai-codex]
 prepare: go mod download     # optional: run in a bot's worktree before each turn
 projects:
@@ -170,7 +171,7 @@ elsewhere.
 
 | Label | |
 |---|---|
-| `agent:<name>` | `opencode`, `claude-code`, or `openai-codex`; `agents.default` without one |
+| `agent:<name>` | `opencode`, `claude-code`, or `openai-codex`; `agents.work` without one |
 | `project:<name>` | the issue is for one project |
 | `framework` | the issue is for the framework and every project |
 
@@ -201,7 +202,7 @@ A task has no schedule. Its open issues are its limit: whenever fewer than
 `max_open` open issues carry its label, the service starts a run. So new
 work comes as fast as the old is merged or closed.
 
-- A run is a turn of the default agent on the Discord checkout (see
+- A run is a turn of a talk agent on the Discord checkout (see
   Discord), in the queue Discord's turns share, so it holds them up while it
   runs, `before` included. It needs no Discord server.
 - `before` runs first, with the server's environment, as `prepare` does. If
@@ -343,8 +344,8 @@ attach files, and start threads in them.
 - **Mention the bot** anywhere in the server and it answers in a thread:
   the one it was mentioned in, or one it starts under the message. It
   reads the conversation, a checkout of the default branch, the issues and
-  pull requests, and earlier discussions in the server, which it can
-  search. When the owner tells it to, it opens, comments on, labels,
+  pull requests, with the code each changes, and earlier discussions in
+  the server, which it can search. When the owner tells it to, it opens, comments on, labels,
   closes, and reopens issues on GitHub as the owner, so the bots take them
   as the owner's word (an issue can show images and videos from the
   checkout, uploaded as the owner's are). It changes issues, never pull
@@ -353,9 +354,28 @@ attach files, and start threads in them.
   pull request and issue the thread is about, so the owner can ask about a
   proposal, ask for a change to it, or have it replaced by another. In a
   conversation someone else started, it can only say what it would do. One
-  Discord turn runs at a time, with the monorepo's default agent.
+  Discord turn runs at a time, with a talk agent.
 
 Without Discord, or when it cannot be reached, the bots work as before.
+
+### Agents' roles
+
+The agents have two roles, so the abler, limited agents decide what to
+build and the slower, unlimited one builds it:
+
+- **`agents.talk`** talk in Discord, write the digest, and run the tasks.
+  They write each issue as a specification: why, the decisions, what done
+  looks like, and what is out of scope, no longer than the change needs.
+  Each turn goes to the first in the list that is not at its
+  subscription's limit. A conversation stays with the agent that started
+  it until that agent is at its limit; then the next one takes it, in a new
+  session, with the whole thread. An agent that says when its limit resets
+  is passed over until then; one that does not, for an hour. Claude Code's
+  reset comes from Anthropic's response, through the proxy. A turn that has
+  already replied or changed GitHub is not taken again. Without
+  `agents.talk`, it is `agents.work`.
+- **`agents.work`** works the issues: an `agent:<name>` label gives an
+  issue to another of `agents.allowed`.
 
 ## Pipelines
 

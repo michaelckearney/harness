@@ -324,6 +324,11 @@ func TestTalkingInAPullRequestsThread(t *testing.T) {
 	}
 	write(t, filepath.Join(h.fake, "pr"), fmt.Sprint(pr.Number))
 	write(t, filepath.Join(h.fake, "issue"), fmt.Sprint(n))
+	// The bot can read the pull request's code, which its checkout of the
+	// default branch does not have.
+	if out, err := h.s.describeChanges(h.s.projects[0], pr.Number); err != nil || !strings.Contains(out, "added projects/app/hello.txt") || !strings.Contains(out, "+hello") {
+		t.Errorf("changes: %v\n%s", err, out)
+	}
 
 	// The owner, in the pull request's thread: the bot knows which pull
 	// request and issue it is, changes the issue, not the pull request,
