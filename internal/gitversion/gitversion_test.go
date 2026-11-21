@@ -126,6 +126,51 @@ func TestCalculate(t *testing.T) {
 	}
 }
 
+// A project's series counts the commits that change its folder or the
+// framework's, and no others.
+func TestCalculateProject(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	commit := func(path, subject string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(subject), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		run("add", path)
+		run("commit", "-q", "-m", subject)
+	}
+	run("init", "-q", "-b", "main")
+	commit("projects/harbor/f", "Before")
+	run("tag", "harbor/v0.2.0")
+	commit("projects/slipway/f", "feat: another project")
+	commit("framework/browser/f", "fix: the framework")
+	commit("projects/harbor/f", "docs: the project")
+
+	p, err := Calculate(ctx, dir, For("harbor", "projects/harbor", "framework"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subjects []string
+	for _, c := range p.Changes {
+		subjects = append(subjects, c.Subject)
+	}
+	if got := strings.Join(subjects, ", "); got != "docs: the project, fix: the framework" || p.Next.String() != "0.2.1" {
+		t.Errorf("got changes %q, next %v; want the project's and the framework's, and 0.2.1", got, p.Next)
+	}
+}
+
 func TestBuild(t *testing.T) {
 	ctx := context.Background()
 	dir := repo(t, []string{"Before", "fix: one"}, map[int]string{0: "v0.4.0", 1: "v0.4.1"})
